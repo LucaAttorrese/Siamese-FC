@@ -16,3 +16,7 @@ __pycache__/
 # Downloaded pretrained networks (cfnet-networks.zip from ftp.robots.ox.ac.uk)
 pretrained/
 cuasp_siamfc/.venv/
+
+# Downloaded datasets (DUT-Anti-UAV, Anti-UAV300), see datasets/MANIFEST.md
+datasets/*
+!datasets/MANIFEST.md
