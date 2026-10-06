@@ -1,0 +1,38 @@
+%YAML 1.2
+---
+# calibration/boresight.yaml -- camera-to-laser/pointing extrinsic transform.
+#
+# PARTIALLY MEASURED (2026-09-21), NOT FULLY VALIDATED -- promoted from
+# calibration/roughtest/boresight.yaml's real, operator-provided measurement
+# (2026-09-17): the camera is mounted 18 cm ABOVE the laser (vertical lever
+# arm only). In this file's Y-down/Z-forward convention (see
+# _point_c_to_laser / _angles_from_point_laser in control/suncubes/camera.py),
+# "above" is more-negative Y, hence t_lc_m.y = -0.18.
+#
+# STILL NOT MEASURED, still assumed:
+#   - lateral (X) and depth (Z) offsets between camera and laser origins --
+#     assumed 0.
+#   - relative rotation between camera and laser boresight axes (R_lc) --
+#     assumed identity (mechanically parallel).
+# Any angle produced using this file has NO accuracy guarantee beyond the one
+# vertical measurement above -- this is a partial promotion of the best
+# currently-known values, not a claim that the boresight procedure is done.
+# The real, complete R_lc/t_lc_m is still expected to come from the planned
+# static test with the laser switched on -- see calibration/README.md's
+# "Camera-to-laser extrinsic calibration".
+#
+# p_L = R_lc * p_C + t_lc_m  (camera-frame point -> laser/pointing frame)
+#
+# camera_calibration.py only reads this file (R_lc/t_lc_m keys, read directly
+# -- it does not accept the inverse R_cl/t_cl_m form that the runtime loader
+# in control/suncubes/camera.py separately supports). It never writes it.
+R_lc: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 1., 0., 0., 0., 1., 0., 0., 0., 1. ]
+t_lc_m: !!opencv-matrix
+   rows: 3
+   cols: 1
+   dt: d
+   data: [ 0., -0.18, 0. ]

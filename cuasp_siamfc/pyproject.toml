@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cuasp"
+version = "0.1.0"
+description = "C-UASP Python runtime: camera vision pipeline, PCMM/KAS motor transport, and system supervisor."
+requires-python = ">=3.10"
+# Exact tested versions are not yet pinned; see README.md "Known integration
+# gaps" / AGENTS.md SS15 for the tracked gap. CI (.github/workflows/tests.yml)
+# now gives at least one continuously-verified (Linux, latest-3.x) combination.
+dependencies = [
+    "numpy",
+    "opencv-contrib-python",
+    "PyYAML",
+]
+# Not listed here: the vendor IDS peak Python SDK (ids_peak / ids_peak_ipl),
+# which is installed from the camera manufacturer's own installer, not PyPI.
+# Tests never import it directly -- see tests/README or the "out of scope"
+# section of the tests gap plan.
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+]
+# Only needed for calibration/camera_calibration.py's offline validation
+# plots (calibration/validation/report/*.png); the calibration solve itself
+# only needs the base numpy/opencv-contrib-python/PyYAML dependencies above.
+calibration = [
+    "matplotlib",
+]
+
+[tool.setuptools]
+package-dir = {"" = "control"}
+
+[tool.setuptools.packages.find]
+where = ["control"]
+include = ["suncubes*"]
+
+[tool.pytest.ini_options]
+# Lets every test just `import suncubes` / `import suncubes.camera` without
+# each file repeating the sys.path.insert() boilerplate `cuasp.py` itself
+# needs (see tests/conftest.py for the analogous helper for cuasp.py, which
+# is a script rather than a package member).
+pythonpath = ["control"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

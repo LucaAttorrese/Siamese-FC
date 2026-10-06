@@ -4,3 +4,11 @@ startup.m
 env_paths_training.m
 env_paths_tracking.m
 remove_ws.sh
+
+# SiamFC / detector weights (referenced by path + SHA256 in cuasp_siamfc settings)
+*.mat
+*.pth
+*.pt
+*.onnx
+__pycache__/
+.pytest_cache/

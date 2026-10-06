@@ -1,0 +1,79 @@
+%YAML 1.2
+---
+# calibration/calibration_legacy_20260921_x_test.yaml -- TEST-ONLY artifact,
+# not part of the real calibration/boresight.yaml promotion pipeline.
+#
+# Identical to calibration/calibration_legacy_20260921.yaml (the 2026-09-21
+# intrinsics, fx/fy~24119/24482, R_lc=identity) EXCEPT for t_lc_m.x, which
+# here is set to -0.05 m (operator-tuned value, 2026-09-23; an initial
+# +0.05 m guess based on "laser 5cm to the left of camera" was flipped to
+# -0.05 m on operator request).
+#
+# Sign reference: t_lc_m is the camera's own origin expressed in the laser
+# frame (p_L = R_lc*p_C + t_lc_m; see calibration/roughtest/boresight.yaml's
+# header comment), in the same X-right/Y-down/Z-forward convention as
+# control/suncubes/camera.py's _point_c_to_laser/_angles_from_point_laser
+# (az = atan2(x, z) -- positive x is to the right, confirmed against real
+# hardware in control/README.md's 2026-09-17 axis-sign test: a target
+# right-of-center produced positive raw azimuth error). By that convention,
+# t_lc_m.x=-0.05 encodes "camera 5cm to the LEFT of the laser" (equivalently,
+# "laser 5cm to the right of camera") -- mirroring how the existing,
+# hand-measured t_lc_m.y=-0.18 encodes "camera 18cm ABOVE the laser"
+# (Y-down: "above" is more-negative Y).
+# t_lc_m.y (-0.18) and t_lc_m.z (0, unmeasured) and R_lc (identity, no
+# rotation -- the earlier 0.4443deg rotation test was reverted at the
+# operator's request) are otherwise unchanged from calibration_legacy_20260921.yaml.
+#
+# This file exists only so control/cuasp.py could be pointed at it for one
+# specific test run. It does NOT replace calibration/boresight.yaml -- that
+# file still holds t_lc_m=(0,-0.18,0); nothing here promotes this 5cm lateral
+# guess into the real calibration artifact. Delete or ignore this file once
+# the test is done.
+schema_version: 1
+calibration_id: cuasp-camera-20260921-01-x-test
+created_utc: "2026-09-21T06:34:35Z"
+calibration_stage: runtime_ready
+runtime_pbvs_ready: 1
+camera_model: "IDS_U3-33D0XCP_Rev1.2"
+lens_model: Edmund_Optics_16mm_UC
+pixel_format: Mono8
+extrinsics_source: "hand-tuned test value (t_lc_m.x=-0.05, operator request 2026-09-23) + boresight.yaml (t_lc_m.y only)"
+intrinsics_source_file: "calibration_intrinsics.yaml"
+intrinsics_software_version: "2026-09-10-camera-intrinsic-calibration-v1"
+intrinsics_generated_utc: "2026-09-17T14:35:41.501Z"
+training_global_rms_px: 0.88843696029371044
+validation_median_view_rmse_px: 0.46302394659318147
+validation_p95_view_rmse_px: 1.4095637279290718
+image_width: 2040 #nb: from datasheet should be 2064x1552; according to claude we're aquiring at 2592x1944
+image_height: 1536
+camera_matrix: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 24119.407724059725, 0., 1139.7645920257792, 0.,
+       24481.978685713217, 586.84194501631839, 0., 0., 1. ]
+dist_coeffs: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [ 0.60972346287636325, 0., 0., 0., 0. ]
+aruco_dict_name: DICT_4X4_100
+marker_size_m: 0.050000000000000003
+target_marker_ids: !!opencv-nd-matrix
+   sizes: [ 2 ]
+   dt: i
+   data: [ 1, 2 ]
+R_lc: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 1., 0., 0., 0., 1., 0., 0., 0., 1. ]
+t_lc_m: !!opencv-matrix
+   rows: 3
+   cols: 1
+   dt: d
+   data: [ -0.16, -0.20, 0. ]
+
+# [-0.18, -0.36, 0]
+
+# working:  data: [ -0.185, -0.17, 0. ]

@@ -1,0 +1,46 @@
+%YAML 1.2
+---
+schema_version: 1
+calibration_id: cuasp-camera-20260923-01
+created_utc: "2026-09-23T13:45:17Z"
+calibration_stage: runtime_ready
+runtime_pbvs_ready: 1
+camera_model: "IDS_U3-33D0XCP_Rev1.2"
+lens_model: Edmund_Optics_16mm_UC
+pixel_format: Mono8
+extrinsics_source: "boresight.yaml"
+intrinsics_source_file: "calibration_intrinsics.yaml"
+intrinsics_software_version: "2026-09-10-camera-intrinsic-calibration-v1"
+intrinsics_generated_utc: "2026-09-23T13:43:50.144Z"
+training_global_rms_px: 1.2108880552053995
+validation_median_view_rmse_px: 1.241124275974073
+validation_p95_view_rmse_px: 1.4595837831521705
+image_width: 2040
+image_height: 1536
+camera_matrix: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 21061.745425905243, 0., 696.71015050083156, 0.,
+       21050.560102733343, 1012.4736462845965, 0., 0., 1. ]
+dist_coeffs: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [ -0.85729378711558912, 0., 0., 0., 0. ]
+aruco_dict_name: DICT_4X4_100
+marker_size_m: 0.050000000000000003
+target_marker_ids: !!opencv-nd-matrix
+   sizes: [ 2 ]
+   dt: i
+   data: [ 1, 2 ]
+R_lc: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 1., 0., 0., 0., 1., 0., 0., 0., 1. ]
+t_lc_m: !!opencv-matrix
+   rows: 3
+   cols: 1
+   dt: d
+   data: [ 0., -0.17999999999999999, 0. ]
