@@ -31,6 +31,14 @@ test = [
 calibration = [
     "matplotlib",
 ]
+# SiamFC tracking source (cuasp_siamfc). torch is installed from the CUDA
+# wheel index: pip install torch --index-url https://download.pytorch.org/whl/cu126
+# Tested: torch 2.14.1+cu126, Python 3.13.3, Windows 11, RTX 4060 Laptop.
+# scipy is only needed by the offline converter (suncubes.siamfc.convert_matconvnet).
+siamfc = [
+    "torch",
+    "scipy",
+]
 
 [tool.setuptools]
 package-dir = {"" = "control"}

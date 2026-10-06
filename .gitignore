@@ -12,3 +12,7 @@ remove_ws.sh
 *.onnx
 __pycache__/
 .pytest_cache/
+
+# Downloaded pretrained networks (cfnet-networks.zip from ftp.robots.ox.ac.uk)
+pretrained/
+cuasp_siamfc/.venv/
