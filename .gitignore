@@ -20,3 +20,6 @@ cuasp_siamfc/.venv/
 # Downloaded datasets (DUT-Anti-UAV, Anti-UAV300), see datasets/MANIFEST.md
 datasets/*
 !datasets/MANIFEST.md
+
+# Training outputs (detector runs, checkpoints)
+runs/

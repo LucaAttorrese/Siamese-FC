@@ -77,13 +77,16 @@ Differences from the original SiamFC that the port follows (reference code:
 |---|---|
 | V1 conversion | `tests/test_siamfc_convert.py`: the folded PyTorch net matches the unfolded MatConvNet semantics (synthetic DagNN). Gray input == replicated RGB. No MATLAB available, so there is no tensor-level comparison against MatConvNet itself. |
 | V2 demo sequence | `tools/eval_sequence.py ../demo-sequences/vot15_bag` (196 frames, 480x360). Gray net on gray frames: mean IoU 0.796, IoU>0.5 on 99.5 % of frames, mean centre error 5.9 px. RGB net on RGB frames: IoU 0.773, 6.4 px. CPU and CUDA give identical results. |
-| V5 latency (unoptimised, fp32) | RTX 4060 Laptop: gray 8.7 ms mean / 13.0 ms p99 per update (~115 Hz). CPU i7-13700H: ~98 ms. |
+| V5 latency (unoptimised, fp32) | Demo sequence (480x360): RTX 4060 Laptop 8.7 ms mean / 13.0 ms p99 per update; CPU i7-13700H ~98 ms. IDS-sized 2592x1944 Mono8 frames (`tools/bench_siamfc.py`, RTX 4060 Laptop, zLR on): targets of 16-150 px take 7.1-8.0 ms mean and 9.4-10.1 ms p99; 400 px targets take 15.3 ms mean and 17.7 ms p99, because a large search region is copied to the GPU as float32. Stage breakdown at 48 px: backbone x3 4.4 ms, template update 1.1 ms, crop+H2D+resize 0.5 ms, xcorr+upsample+peak 0.5 ms. Without the template update (zLR = 0): about -1.3 ms. Not yet measured on the RTX 5090. |
 
 ## Layout
 
 ```
 control/suncubes/siamfc/      new: SiamFC port (convert_matconvnet, net, tracker, imresize)
 tools/eval_sequence.py        new: VOT-format sequence evaluation (accuracy + latency)
+tools/bench_siamfc.py         new: latency benchmark on IDS-sized Mono8 frames
+tools/prepare_yolo_dataset.py new: builds the grayscale YOLO detector dataset
+tools/train_detector.py       new: detector training (Ultralytics YOLO)
 control/cuasp.py, suncubes/   copies of C-UASP (integration changes go here)
 calibration/                  copies of the C-UASP calibration YAMLs (read-only)
 tests/                        copied C-UASP tests + new SiamFC tests
@@ -91,9 +94,36 @@ tests/                        copied C-UASP tests + new SiamFC tests
 
 ## Setup
 
+The CUDA build of PyTorch must match the GPU generation:
+
+| Machine | GPU (arch) | PyTorch wheel index | Notes |
+|---|---|---|---|
+| Development laptop | RTX 4060 Laptop (`sm_89`) | `cu126` | Validated configuration (torch 2.14.1+cu126) |
+| Training / runtime PC | RTX 5090 (Blackwell, `sm_120`) | **`cu130`** | The `cu126` build stops at `sm_90` and **does not run** on the 5090. `cu130` needs an NVIDIA driver supporting CUDA 13.0 (R580 or newer). |
+
+Install torch **and torchvision from the same CUDA index before anything else**.
+Otherwise `pip install ultralytics` pulls a CPU-only torchvision from PyPI, and NMS fails
+on the GPU (`Could not run 'torchvision::nms' with arguments from the 'CUDA' backend`).
+This happened on 2026-10-07.
+
 ```
+# from Siamese-FC/cuasp_siamfc (Windows paths; on Linux use .venv/bin/python)
 python -m venv .venv
-.venv/Scripts/python -m pip install torch --index-url https://download.pytorch.org/whl/cu126
-.venv/Scripts/python -m pip install numpy opencv-contrib-python PyYAML scipy pytest pytest-asyncio
-.venv/Scripts/python -m suncubes.siamfc.convert_matconvnet ../pretrained/networks/baseline-conv5_gray_e100.mat
+.venv/Scripts/python -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130   # RTX 5090
+#                                                                                              .../whl/cu126   # RTX 4060
+.venv/Scripts/python -m pip install numpy opencv-contrib-python PyYAML scipy pytest pytest-asyncio ultralytics
+.venv/Scripts/python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__, torch.cuda.get_device_name(0), torch.cuda.get_arch_list()); b = torch.rand(8, 4, device='cuda'); b[:, 2:] += b[:, :2]; print('nms on', torchvision.ops.nms(b, torch.rand(8, device='cuda'), 0.5).device)"
 ```
+
+The check must print a `+cu130` (or `+cu126`) version for both packages, include `sm_120`
+on the 5090, and print `nms on cuda:0`.
+
+Weights and data are not in git. On a new machine:
+
+1. download `cfnet-networks.zip` (link and SHA256 above) and unzip it into `../pretrained/`;
+2. convert the networks:
+   `.venv/Scripts/python -m suncubes.siamfc.convert_matconvnet ../pretrained/networks/baseline-conv5_gray_e100.mat`
+   (run from `control/`, or set `PYTHONPATH=control`);
+3. download, extract and convert the datasets following `../datasets/MANIFEST.md`;
+4. run `pytest` (expected: everything green except the pre-existing ArUco test listed in
+   `PROVENANCE.md`) and `tools/bench_siamfc.py` to record that machine's latency.
