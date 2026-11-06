@@ -1,8 +1,9 @@
 # CLAUDE.md — Siamese-FC / cuasp_siamfc
 
-Contesto per Claude Code su questa repository, in particolare sul PC di training ed esercizio con **RTX 5090**.
-Il piano dettagliato, con lo stato di ogni fase, è in [PLAN.md](PLAN.md). La procedura operativa per la 5090 è in
-[cuasp_siamfc/README.md](cuasp_siamfc/README.md) (sezione "Using this repository on the RTX 5090 PC").
+Contesto per Claude Code su questa repository, in particolare sul PC di training ed esercizio: portatile con **RTX 5060 Laptop (8 GB)**,
+Ryzen 7 260, 31 GB di RAM. Ha sostituito il PC con RTX 5090 previsto in origine (decisione del 2026-11-06).
+Il piano dettagliato, con lo stato di ogni fase, è in [PLAN.md](PLAN.md). La procedura operativa per questo PC è in
+[cuasp_siamfc/README.md](cuasp_siamfc/README.md) (sezione "Using this repository on the training PC").
 
 ## Regole di lavoro (decise dall'utente, vincolanti)
 
@@ -30,7 +31,7 @@ più un detector **YOLO** per l'inizializzazione e il riaggancio. A valle non ca
 ```
 PLAN.md                         piano e stato delle fasi (leggere per primo)
 cuasp_siamfc/
-  README.md                     setup 5090, comandi, validazione, licenze
+  README.md                     setup del PC di training, comandi, validazione, licenze
   PROVENANCE.md                 file copiati da C-UASP + SHA256
   control/cuasp.py              supervisore C-UASP (copia; ancora pipeline ArUco)
   control/suncubes/             camera.py, motors.py, settings.py (copie C-UASP)
@@ -60,7 +61,9 @@ Riferimenti di regressione:
 
 ## Insidie già incontrate
 
-- **PyTorch sulla 5090**: serve l'indice **cu130** (Blackwell `sm_120`). La build cu126 si ferma a `sm_90` e sulla 5090 non parte.
+- **PyTorch su GPU Blackwell** (RTX 5060 Laptop di questo PC, come qualsiasi RTX 50xx): serve l'indice **cu130** (`sm_120`). La build cu126 si ferma a `sm_90` e qui non parte.
+- **Python ≥ 3.13 su Windows**: con 3.12 `time.monotonic()` avanza a scatti di 16 ms, più di un frame a 70 Hz. C-UASP lo usa per età e freschezza dei campioni, e `test_read_candidate_reuses_cached_result_for_unchanged_sequence` fallisce a intermittenza. La venv va creata con `py -3.13 -m venv .venv`.
+- **Script con worker su Windows**: qualsiasi script che lancia un training Ultralytics con `workers > 0` deve avere `if __name__ == "__main__":`, altrimenti i processi figli rieseguono lo script e il training si ferma con `RuntimeError` (`freeze_support`). `train_detector.py` è già a posto.
 - **torchvision solo CPU**: installare torch e torchvision dallo stesso indice CUDA **prima** di `ultralytics`. Altrimenti pip prende torchvision da PyPI e NMS fallisce su CUDA.
 - **OpenCV**: `ultralytics` installa anche `opencv-python` accanto a `opencv-contrib-python`. Controllare che `cv2.aruco` esista.
 - **Training su Windows**: i worker del dataloader impegnano circa 1.7 GB di memoria virtuale ciascuno, e la validazione ne usa il doppio. Con 4 worker il portatile è andato in `WinError 1455` e la validazione si è bloccata senza errori. Usare **`--workers 2`**; `last.pt` permette la ripresa (`YOLO(last.pt).train(resume=True)`).
@@ -71,11 +74,11 @@ Riferimenti di regressione:
 
 ## Stato al 2026-11-06 e prossimi passi
 
-Fatto: copia della baseline C-UASP; port SiamFC validato offline (con copia dei crop in uint8: 6.9–8.9 ms per frame sulla 4060 fino a target di 400 px); dataset del detector pronti; script di training pronto.
+Fatto: copia della baseline C-UASP; port SiamFC validato offline (con copia dei crop in uint8: 6.9–8.9 ms per frame sulla 4060 e 5.9–8.1 ms sulla 5060 Laptop, fino a target di 400 px); dataset del detector pronti sul portatile; script di training pronto.
 
-Sulla 5090, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzione"):
-1. Setup secondo il README (venv cu130, pesi, test, benchmark) e registrazione della latenza della 5090 nel README (V5).
-2. Dataset: ricostruirli con `datasets/MANIFEST.md`, oppure copiarli dal portatile.
-3. Training di YOLO11s, misurando la prima epoca prima di stimare la durata; valutazione sul test per sorgente.
+Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzione"):
+1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
+2. 🟡 Dataset: ricostruiti con `datasets/MANIFEST.md` (in corso il 2026-11-06).
+3. Training di YOLO11s: circa 7–7,5 ore stimate per 40 epoche a 1280 px (batch 3). Misurare la prima epoca prima di confermare; poi valutazione sul test per sorgente.
 4. Fasi 3–4: `detector.py`, adapter `ids_siamfc`, settings e `cuasp.py`, con i relativi test.
 5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.

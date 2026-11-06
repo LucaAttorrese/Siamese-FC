@@ -13,7 +13,8 @@ Obiettivo: sostituire la parte ArUco/PnP con il tracker **SiamFC**, lasciando in
 | Tema | Decisione |
 |---|---|
 | Camera | Resta la **IDS** (Mono8, 2592x1944 in `settings.py`, target 70 Hz, teleobiettivo). Niente OAK. |
-| Calcolo | Tutto sull'host. Sviluppo: portatile con RTX 4060 (8 GB). **Training ed esercizio: PC con RTX 5090** (deciso il 2026-11-04). |
+| Calcolo | Tutto sull'host. Sviluppo: portatile con RTX 4060 (8 GB). **Training ed esercizio: portatile con RTX 5060 Laptop (8 GB)**, Ryzen 7 260, 31 GB di RAM. Sostituisce il PC con RTX 5090 previsto il 2026-11-04 (decisione del 2026-11-06). Stessa memoria video del portatile di sviluppo: batch 3 a 1280 px, training più lunghi che sulla 5090. |
+| Python | **3.13 o successivo.** Su Windows, con 3.12, `time.monotonic()` avanza a scatti di 16 ms, più di un frame a 70 Hz (vedi Rischi). |
 | Pesi SiamFC | L'originale `2016-08-17.net.mat` non è più scaricabile. Si usa **CFNet "Baseline-conv5"**, variante addestrata in grigio `baseline-conv5_gray_e100.mat` (Valmadre et al., CVPR 2017). La RGB `baseline-conv5_e55.mat` serve solo per i confronti. |
 | Inizializzazione e recupero | **Detector YOLO** (Ultralytics YOLO11) addestrato su droni, asincrono a bassa frequenza, come oggi l'ArUco. |
 | Licenza Ultralytics | AGPL-3.0, **accettata** perché il sistema serve per ora solo a validare l'approccio (2026-11-06). Per un prodotto non open source servirebbe una licenza Enterprise o un detector con licenza permissiva. |
@@ -54,8 +55,8 @@ Fatto:
 - dataset YOLO in grigio `datasets/yolo_uav_gray` (train 12699 / val 5709 / test 6480), costruito con `tools/prepare_yolo_dataset.py`;
 - script di training `tools/train_detector.py` (YOLO11s, imgsz 1280, augmentation di colore disattivata, seed fisso).
 
-Da fare sulla 5090:
-1. Primo training. Comando e avvertenze in `cuasp_siamfc/README.md` §7: **`--workers 2`**, ripresa da `last.pt`. Configurazione proposta: 40 epoche a 1280 px. Misurare la prima epoca prima di decidere.
+Da fare sul PC di training (RTX 5060 Laptop):
+1. Primo training. Comando e avvertenze in `cuasp_siamfc/README.md` §7: **`--workers 2`**, ripresa da `last.pt`. Configurazione proposta: 40 epoche a 1280 px. Stima misurata su un dataset sintetico equivalente (2026-11-06): circa 10–11 minuti per epoca, quindi **circa 7–7,5 ore**. Confermarla sulla prima epoca reale prima di decidere.
 2. Valutazione sul test, separata per sorgente (prefissi `dut_*` e `auav_*`), con attenzione ai droni piccoli.
 3. `control/suncubes/siamfc/detector.py`: interfaccia `DroneDetector` (Protocol) `detect(gray, roi_xywh | None) -> list[Detection(bbox_xywh, score)]`, sostituibile e simulabile nei test. Implementazione Ultralytics in PyTorch (niente ONNX per ora). Sui frame IDS da 5 MP va valutata l'inferenza a tasselli (tile 640 con sovrapposizione, ispirata a `MultiMarkerTiledPreprocessor` / `_next_scout_roi` in `camera.py`).
 4. In seguito: frame IDS registrati ed etichettati del rig, da aggiungere al dataset.
@@ -93,7 +94,7 @@ Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siam
   - `_draw_debug_frame` disegna il bbox SiamFC e le detezioni;
   - il messaggio `[MOTOR] marker lost` diventa `target lost`;
   - **nessuna modifica** a PBVS, segni, clamp e dispatcher.
-- `pyproject.toml`: dipendenze opzionali aggiornate (torch cu130 sulla 5090, ultralytics).
+- `pyproject.toml`: dipendenze opzionali aggiornate (torch cu130 sulle GPU Blackwell, ultralytics).
 - Documentazione: README e note sulla nuova pipeline, i thread e il limite della Z fissa.
 
 ## Fase 5 — Validazione (livelli di evidenza separati)
@@ -104,8 +105,8 @@ Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siam
 | V2 sequenza demo | `tools/eval_sequence.py` su `demo-sequences/vot15_bag` | Nessuna deriva | ✅ IoU 0.796, errore medio 5.9 px. Non indipendente: `bag` è nel validation set su cui il paper ha tarato gli iperparametri (vedi P2) |
 | V3 benchmark | OTB-2013/OTB-100 (toolkit `got10k`), rete RGB su RGB e rete grigia su OTB convertito in grigio | Vedi P1 | ⏳ |
 | V4 dominio drone | DUT tracking, Anti-UAV300 test e sequenze IDS registrate (registratore Mono8 con `ts_capture_ns`) | Success/precision, errore del centro in px **e in mrad** (÷fx), tempo di riaggancio, falsi riagganci | ⏳ |
-| V4b ricerca iperparametri | Random search, procedura del paper App. F (sezione sotto) | I parametri tarati devono battere quelli della Tab. 2 sul test held-out, altrimenti restano quelli del paper | ⏳ Da fare sulla 5090 |
-| V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame (14.3 ms a 70 Hz, 20 ms a 50 fps) con il detector attivo | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5090 non ancora misurata |
+| V4b ricerca iperparametri | Random search, procedura del paper App. F (sezione sotto) | I parametri tarati devono battere quelli della Tab. 2 sul test held-out, altrimenti restano quelli del paper | ⏳ Da fare sul PC di training |
+| V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame (14.3 ms a 70 Hz, 20 ms a 50 fps) con il detector attivo | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5060 Laptop (PC di training): 5.9–8.1 ms medi, p99 ≤ 9.2 ms. Manca la misura con il detector attivo sulla stessa GPU |
 | V6 pytest | Suite in `cuasp_siamfc/tests` | Tutto verde; senza torch i test SiamFC vengono saltati, non falliscono | 🟡 Verde, a parte il test ArUco già rotto in C-UASP |
 | V7 banco, motori spenti | IDS dal vivo con `CV_CUAS_ENABLE_MOTOR_COMMANDS=0`. Drone **con ArUco montati**: la pipeline ArUco registrata fa da riferimento offline per SiamFC sugli stessi frame | Differenza angolare entro un budget da concordare; segni az/po corretti | ⏳ |
 | V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1` | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
@@ -140,7 +141,7 @@ Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siam
 - Inizializzazione dal groundtruth.
 
 **Strategia.**
-1. 300 configurazioni su circa 40 video, una partenza, con più processi in parallelo sulla 5090.
+1. 300 configurazioni su circa 40 video, una partenza. Sulla 5060 Laptop la stima è di circa 20 ore con un processo (circa 7 ms per frame, decodifica inclusa); più processi in parallelo possono aiutare perché SiamFC non satura la GPU. Il passo 2 aggiunge circa 8 ore. Stime da confermare con il run pilota.
 2. Le 10 migliori sul set completo, con 3 partenze.
 3. Prima di tutto, un run pilota di 5 configurazioni per misurare i tempi.
 
@@ -167,6 +168,7 @@ Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siam
 - **Target piccoli e grandi**: sotto circa 16 px (indicativo; un drone di 35 cm ci arriva a circa 460–585 m) degradano tracker e detector. Sopra circa 400 px la latenza cresce, problema mitigato dalla copia in uint8.
 - **Z fissa**: errore di parallasse ≈ |t_lc|·|1/Z_vera − 1/Z_fissa| rad. Va documentato e loggato; serve un hook per una futura Z da sensore esterno.
 - **Memoria in training su Windows**: i worker del dataloader impegnano circa 1.7 GB di memoria virtuale ciascuno e la validazione ne usa il doppio. Usare `--workers 2`.
+- **Risoluzione dell'orologio su Windows** (trovato il 2026-11-06): con Python 3.12 `time.monotonic()` usa `GetTickCount64()` e avanza a scatti di 16 ms, più di un frame a 70 Hz (14.3 ms). C-UASP usa `monotonic_ns` per età e freschezza dei campioni, e `test_read_candidate_reuses_cached_result_for_unchanged_sequence` fallisce a intermittenza. Da Python 3.13 l'orologio è `QueryPerformanceCounter()` (0.1 µs). Ogni macchina che esegue il runtime deve usare Python ≥ 3.13.
 - **Sicurezza**: nessun cambio a limiti, KAS o dispatcher. Le prove al banco partono sempre con i motori disabilitati.
 - **Piano B, fine-tuning di SiamFC**: se V4/V4b non bastano, fine-tuning dei pesi sui video di droni (ricetta in App. A del paper: SGD, batch 8, coppie a distanza massima di 100 frame, loss logistica). Richiede un training PyTorch da scrivere: in repo ci sono solo il training MATLAB della rete del 2016 e un convertitore che fonde le BN.
 
@@ -180,10 +182,10 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 - **P4 — Confidenza `sigmoid(picco)`**: la rete è addestrata con loss logistica e lo score dopo `fin_adjust_bn` ne è l'ingresso, quindi `sigmoid(picco)` più APCE è una misura più fondata del rapporto con il picco iniziale, che deriva con l'aggiornamento del template.
 - Nota: il template update va lasciato attivo. La Fig. 4 del paper mostra che aiuta sempre; `zLR = 0` è solo un dato di latenza.
 
-## Ordine di esecuzione (dalla 5090 in poi)
+## Ordine di esecuzione (sul PC di training, RTX 5060 Laptop)
 
-1. Setup della 5090 secondo `cuasp_siamfc/README.md` (venv cu130, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5.
-2. Ricostruzione dei dataset (`datasets/MANIFEST.md`), oppure copia dal portatile.
+1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
+2. 🟡 Ricostruzione dei dataset (`datasets/MANIFEST.md`), in corso il 2026-11-06.
 3. Training del detector YOLO11s e valutazione sul test.
 4. `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.

@@ -32,8 +32,11 @@ calibration = [
     "matplotlib",
 ]
 # SiamFC tracking source (cuasp_siamfc). torch is installed from the CUDA
-# wheel index: pip install torch --index-url https://download.pytorch.org/whl/cu126
-# Tested: torch 2.14.1+cu126, Python 3.13.3, Windows 11, RTX 4060 Laptop.
+# wheel index: pip install torch --index-url https://download.pytorch.org/whl/cu130
+# (cu126 is enough for Ada/RTX 40xx but does not run on Blackwell/RTX 50xx).
+# Tested: torch 2.14.1+cu126, Python 3.13.3, Windows 11, RTX 4060 Laptop;
+#         torch 2.14.1+cu130, Python 3.13.17, Windows 11, RTX 5060 Laptop.
+# On Windows use Python >= 3.13: 3.12 has a 16 ms time.monotonic() step.
 # scipy is only needed by the offline converter (suncubes.siamfc.convert_matconvnet).
 siamfc = [
     "torch",

@@ -16,11 +16,16 @@ integration changes are made on these copies.
 |---|---|
 | SiamFC port (converter, network, tracker) | Done and validated offline (V1, V2, V5 below) |
 | Detector datasets (DUT-Anti-UAV, Anti-UAV300 → grayscale YOLO set) | Done, see `../datasets/MANIFEST.md` |
-| Detector training (YOLO11s) | Script ready (`tools/train_detector.py`); first run stopped on the laptop (out of virtual memory), to be run on the RTX 5090 |
+| Detector training (YOLO11s) | Script ready (`tools/train_detector.py`); first run stopped on the laptop (out of virtual memory), to be run on the training PC (RTX 5060 Laptop, estimated ~7–7.5 h for 40 epochs, see §7) |
 | Camera adapter `ids_siamfc` and its wiring into `cuasp.py` / `settings.py` | **Not implemented yet**: `control/cuasp.py` is still the unchanged C-UASP copy and runs the **ArUco** pipeline |
 | Validation on drone data, hyperparameter search, bench tests (V3, V4, V4b, V6–V8) | Not started |
 
-## Using this repository on the RTX 5090 PC
+## Using this repository on the training PC
+
+Since 2026-11-06 the training and runtime machine is a laptop with an
+**RTX 5060 Laptop GPU (8 GB)**, Ryzen 7 260 and 31 GB RAM. It replaces the RTX 5090 PC
+planned earlier. The procedure below also applies to any other Blackwell GPU
+(RTX 50xx, `sm_120`).
 
 Commands are for **Windows PowerShell**, run from `Siamese-FC\cuasp_siamfc` unless
 stated otherwise. On Linux, use `.venv/bin/python` instead of `.\.venv\Scripts\python`.
@@ -30,7 +35,7 @@ stated otherwise. On Linux, use `.venv/bin/python` instead of `.\.venv\Scripts\p
 | Item | Requirement |
 |---|---|
 | GPU driver | NVIDIA driver supporting **CUDA 13.0** (R580 or newer). Check with `nvidia-smi` (top-right "CUDA Version" ≥ 13.0). |
-| Python | 3.13 (tested: 3.13.3). |
+| Python | **3.13 or newer** (tested: 3.13.3 on the development laptop, 3.13.17 on the training PC). Do not use 3.12 or older on Windows: there `time.monotonic()` is `GetTickCount64()` with a **16 ms** step, coarser than one frame at 70 Hz (14.3 ms). C-UASP uses `monotonic_ns` for sample age and freshness checks, and `test_multi_marker_detection_e2e.py::test_read_candidate_reuses_cached_result_for_unchanged_sequence` fails intermittently. From 3.13 it is `QueryPerformanceCounter()` (0.1 µs). Check with `python -c "import time; print(time.get_clock_info('monotonic'))"`. |
 | Git | To get the code. |
 | Disk | About **35 GB** free: venv ~5 GB, datasets ~10 GB extracted plus ~10 GB of zips while downloading (deleted afterwards), YOLO dataset 3.6 GB, training runs a few GB. |
 | Internet | To download packages, weights, datasets, and the YOLO starting weights (`yolo11s.pt`; Ultralytics also downloads `yolo26n.pt` for its AMP check). |
@@ -42,7 +47,7 @@ The work is on the branch **`siamfc-python`** of
 <https://github.com/LucaAttorrese/Siamese-FC>. Only committed and pushed changes
 reach the new PC. Weights, datasets, venv and training runs are gitignored and must
 be recreated (steps 3, 4, 6). Copying them from the laptop also works, except the venv,
-which needs the `cu130` build on the 5090.
+which needs the `cu130` build on a Blackwell GPU.
 
 ```powershell
 git clone -b siamfc-python https://github.com/LucaAttorrese/Siamese-FC.git
@@ -51,9 +56,9 @@ cd Siamese-FC\cuasp_siamfc
 
 ### 3. Python environment
 
-The RTX 5090 is a Blackwell GPU (`sm_120`). PyTorch must come from the **`cu130`**
-wheel index. The `cu126` build used on the development laptop stops at `sm_90` and
-**does not run** on the 5090.
+The RTX 5060 Laptop (like any RTX 50xx) is a Blackwell GPU (`sm_120`). PyTorch must come
+from the **`cu130`** wheel index. The `cu126` build used on the development laptop stops at
+`sm_90` and **does not run** on Blackwell GPUs.
 
 Install torch **and torchvision from the same CUDA index before anything else**.
 Otherwise `pip install ultralytics` pulls a CPU-only torchvision from PyPI, and NMS fails
@@ -61,7 +66,7 @@ on the GPU (`Could not run 'torchvision::nms' with arguments from the 'CUDA' bac
 This happened on the laptop on 2026-10-07.
 
 ```powershell
-python -m venv .venv
+py -3.13 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
 .\.venv\Scripts\python -m pip install numpy opencv-contrib-python PyYAML scipy pytest pytest-asyncio ultralytics
@@ -73,8 +78,8 @@ Check the installation:
 .\.venv\Scripts\python -c "import torch, torchvision, cv2; print(torch.__version__, torchvision.__version__, torch.cuda.get_device_name(0)); print(torch.cuda.get_arch_list()); b = torch.rand(8, 4, device='cuda'); b[:, 2:] += b[:, :2]; print('nms on', torchvision.ops.nms(b, torch.rand(8, device='cuda'), 0.5).device); print('cv2', cv2.__version__, 'aruco', hasattr(cv2, 'aruco'))"
 ```
 
-Expected: `2.14.1+cu130 0.29.1+cu130 NVIDIA GeForce RTX 5090`, an arch list that
-contains `sm_120`, `nms on cuda:0`, and `aruco True`.
+Expected: `2.14.1+cu130 0.29.1+cu130 NVIDIA GeForce RTX 5060 Laptop GPU`, an arch list
+that contains `sm_120`, `nms on cuda:0`, and `aruco True`.
 
 `ultralytics` also installs `opencv-python` next to `opencv-contrib-python`. Both
 provide the `cv2` module. If `aruco` prints `False` (the ArUco pipeline in `cuasp.py`
@@ -82,17 +87,18 @@ needs it), run
 `.\.venv\Scripts\python -m pip uninstall -y opencv-python opencv-contrib-python` and then
 `.\.venv\Scripts\python -m pip install opencv-contrib-python`.
 
-Versions validated on the laptop (2026-11-06):
+Versions validated (2026-11-06):
 
-| Package | Version |
-|---|---|
-| torch / torchvision | 2.14.1 / 0.29.1 (`+cu126` on the laptop; use `+cu130` on the 5090) |
-| ultralytics | 8.4.174 |
-| numpy | 2.5.3 |
-| opencv-contrib-python | 5.0.0.93 |
-| scipy | 1.18.1 |
-| PyYAML | 6.0.3 |
-| pytest / pytest-asyncio | 9.1.1 / 1.4.0 |
+| Package | Development laptop (RTX 4060) | Training PC (RTX 5060 Laptop) |
+|---|---|---|
+| Python | 3.13.3 | 3.13.17 |
+| torch / torchvision | 2.14.1+cu126 / 0.29.1+cu126 | 2.14.1+cu130 / 0.29.1+cu130 |
+| ultralytics | 8.4.174 | 8.4.203 |
+| numpy | 2.5.3 | 2.5.4 |
+| opencv-contrib-python | 5.0.0.93 | 5.0.0.93 (`opencv-python` 5.0.0.93 also present, `aruco` available) |
+| scipy | 1.18.1 | 1.18.1 |
+| PyYAML | 6.0.3 | 6.0.3 |
+| pytest / pytest-asyncio | 9.1.1 / 1.4.0 | 9.2.0 / 1.4.1.post1 |
 
 ### 4. SiamFC weights
 
@@ -125,7 +131,10 @@ The converter writes `baseline-conv5_gray_e100.pth` next to the `.mat`, plus a
 - `pytest`: everything passes except
   `test_multi_marker_fusion.py::test_settings_default_target_offsets_match_restored_rig_values`.
   That failure is pre-existing in C-UASP (see `PROVENANCE.md`) and unrelated to SiamFC.
-- `bench_siamfc.py`: record the numbers in "Validation status" below (V5, RTX 5090 row).
+  On Python 3.12 or older on Windows,
+  `test_multi_marker_detection_e2e.py::test_read_candidate_reuses_cached_result_for_unchanged_sequence`
+  also fails intermittently because of the 16 ms clock (see Prerequisites): use 3.13.
+- `bench_siamfc.py`: record the numbers in "Validation status" below (V5, one row per machine).
 - `eval_sequence.py`: must give the same accuracy as on the laptop (mean IoU 0.796,
   mean centre error 5.9 px). Only the timing changes between machines.
 
@@ -151,10 +160,18 @@ resulting image counts are listed there.
   (`WinError 1455`) and hung the first validation. Close WSL (`wsl --shutdown`) during
   training if it is not needed: it holds about 4 GB.
 - `--batch -1` (default) lets Ultralytics choose the batch size for 60 % of GPU
-  memory. On the laptop (8 GB) it picked 3 at 1280 px; the 5090 (32 GB) will pick a
-  much larger one.
-- Duration: measure the first epoch before planning. Reference: on the laptop one
-  epoch at 1280 px took ~16 min of training plus validation.
+  memory. Both 8 GB machines (development laptop and training PC) get batch 3 at 1280 px.
+- Duration: measure the first epoch before planning. References at 1280 px, batch 3,
+  `--workers 2`:
+  - development laptop (RTX 4060 Laptop): one epoch ~16 min of training plus validation;
+  - training PC (RTX 5060 Laptop), measured on 2026-11-06 on a synthetic stand-in of
+    `yolo_uav_gray` (600 train / 300 val grayscale JPEGs, 1920x1080 and 1280x720, same
+    training settings as `train_detector.py`): 24 train images/s and 78 val images/s in
+    steady state. That gives ~9 min of training plus ~1–2 min of validation per epoch on
+    the real set, so **~7–7.5 h for 40 epochs**. The synthetic JPEGs are about 5 times
+    larger than the real ones, so this estimate is on the pessimistic side; check it
+    against the first real epoch. Keep the laptop on mains power, in a performance power
+    mode, with sleep disabled.
 - The run can be stopped at any time and resumed from the last completed epoch:
 
   ```powershell
@@ -280,7 +297,7 @@ Differences from the original SiamFC that the port follows (reference code:
 | V1 conversion | `tests/test_siamfc_convert.py`: the folded PyTorch net matches the unfolded MatConvNet semantics (synthetic DagNN). Gray input == replicated RGB. No MATLAB available, so there is no tensor-level comparison against MatConvNet itself. |
 | V2 demo sequence | `tools/eval_sequence.py ../demo-sequences/vot15_bag` (196 frames, 480x360). Gray net on gray frames: mean IoU 0.796, IoU>0.5 on 99.5 % of frames, mean centre error 5.9 px. RGB net on RGB frames: IoU 0.773, 6.4 px. CPU and CUDA give identical results. |
 | V5 latency, RTX 4060 Laptop (fp32, uint8 crop transfer, 2026-11-06) | IDS-sized 2592x1944 Mono8 frames (`tools/bench_siamfc.py`, zLR on): 16-150 px targets take 6.9-7.0 ms mean and 8.0-10.8 ms p99; 400 px targets take 8.9 ms mean and 11.7 ms p99 (15.3 / 17.7 ms before the uint8 transfer). Stage breakdown at 48 px: backbone x3 4.4 ms, template update 1.1 ms, crop+H2D+resize 0.45 ms, xcorr+upsample+peak 0.5 ms. Demo sequence (480x360): 7.9-8.1 ms mean. CPU i7-13700H: ~98 ms. |
-| V5 latency, RTX 5090 | Not measured yet: run `tools/bench_siamfc.py` (step 5). |
+| V5 latency, RTX 5060 Laptop, training PC (fp32, uint8 crop transfer, torch 2.14.1+cu130, 2026-11-06) | IDS-sized 2592x1944 Mono8 frames (`tools/bench_siamfc.py`, zLR on): 16-150 px targets take 5.9-6.4 ms mean and 7.1-8.7 ms p99; 400 px targets take 8.1 ms mean and 9.2 ms p99. With zLR = 0: 4.7-5.1 ms mean (16-150 px), 6.5 ms (400 px). Stage breakdown at 48 px: backbone x3 3.4 ms, template update 1.2 ms, crop+H2D+resize 0.42 ms, xcorr+upsample+peak 0.47 ms. Demo sequence (480x360, gray): 6.4 ms mean, 8.6 ms p99, with the same accuracy as on the laptop (IoU 0.796, 5.9 px). Not yet measured with the detector running on the same GPU. |
 
 ## Layout
 
