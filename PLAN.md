@@ -53,10 +53,10 @@ File C-UASP copiati in `cuasp_siamfc/` (commit `474450c`). Baseline dei test: tu
 Fatto:
 - dataset scaricati, con link, SHA256 e procedura di ricostruzione in `datasets/MANIFEST.md`: DUT-Anti-UAV (detection e tracking) e Anti-UAV300 (solo la parte visibile);
 - dataset YOLO in grigio `datasets/yolo_uav_gray` (train 12699 / val 5709 / test 6480), costruito con `tools/prepare_yolo_dataset.py`;
-- script di training `tools/train_detector.py` (YOLO11s, imgsz 1280, augmentation di colore disattivata, seed fisso).
+- script di training `tools/train_detector.py` (YOLO11s, imgsz 1280, augmentation di colore disattivata, seed fisso), con stop pulito a fine epoca (`--request-stop`) e ripresa (`--resume`), verificati end-to-end (2026-11-06).
 
 Da fare sul PC di training (RTX 5060 Laptop):
-1. Primo training. Comando e avvertenze in `cuasp_siamfc/README.md` §7: **`--workers 2`**, ripresa da `last.pt`. Configurazione proposta: 40 epoche a 1280 px. Stima misurata su un dataset sintetico equivalente (2026-11-06): circa 10–11 minuti per epoca, quindi **circa 7–7,5 ore**. Confermarla sulla prima epoca reale prima di decidere.
+1. 🟡 Primo training, run `yolo11s_uav_gray_1280_e40`: 40 epoche a 1280 px, batch 3, `--workers 2`, eseguito a tappe con stop e ripresa. Comando e avvertenze in `cuasp_siamfc/README.md` §7. Durata misurata sulla prima epoca (2026-11-06): **10,1 minuti** (8,9 di train e 1,2 di validazione), quindi **circa 6,7 ore** per 40 epoche. Epoca 1: mAP50 0,722, mAP50-95 0,413 in validazione (ancora in warm-up).
 2. Valutazione sul test, separata per sorgente (prefissi `dut_*` e `auav_*`), con attenzione ai droni piccoli.
 3. `control/suncubes/siamfc/detector.py`: interfaccia `DroneDetector` (Protocol) `detect(gray, roi_xywh | None) -> list[Detection(bbox_xywh, score)]`, sostituibile e simulabile nei test. Implementazione Ultralytics in PyTorch (niente ONNX per ora). Sui frame IDS da 5 MP va valutata l'inferenza a tasselli (tile 640 con sovrapposizione, ispirata a `MultiMarkerTiledPreprocessor` / `_next_scout_roi` in `camera.py`).
 4. In seguito: frame IDS registrati ed etichettati del rig, da aggiungere al dataset.
@@ -186,7 +186,7 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
 2. ✅ Ricostruzione dei dataset (`datasets/MANIFEST.md`) il 2026-11-06: hash e conteggi uguali al MANIFEST.
-3. Training del detector YOLO11s e valutazione sul test.
+3. 🟡 Training del detector YOLO11s (circa 6,7 ore, a tappe con stop e ripresa) e valutazione sul test.
 4. `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

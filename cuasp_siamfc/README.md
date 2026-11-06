@@ -16,7 +16,7 @@ integration changes are made on these copies.
 |---|---|
 | SiamFC port (converter, network, tracker) | Done and validated offline (V1, V2, V5 below) |
 | Detector datasets (DUT-Anti-UAV, Anti-UAV300 → grayscale YOLO set) | Done, see `../datasets/MANIFEST.md` |
-| Detector training (YOLO11s) | Script ready (`tools/train_detector.py`); first run stopped on the laptop (out of virtual memory), to be run on the training PC (RTX 5060 Laptop, estimated ~7–7.5 h for 40 epochs, see §7) |
+| Detector training (YOLO11s) | In progress on the training PC (RTX 5060 Laptop): run `yolo11s_uav_gray_1280_e40`, trained in stages with stop/resume, 10.1 min per epoch (~6.7 h for 40 epochs, see §7). The first attempt on the development laptop stopped (out of virtual memory) |
 | Camera adapter `ids_siamfc` and its wiring into `cuasp.py` / `settings.py` | **Not implemented yet**: `control/cuasp.py` is still the unchanged C-UASP copy and runs the **ArUco** pipeline |
 | Validation on drone data, hyperparameter search, bench tests (V3, V4, V4b, V6–V8) | Not started |
 
@@ -189,17 +189,17 @@ Stop and resume (details in the docstring of `tools/train_detector.py`):
   training if it is not needed: it holds about 4 GB.
 - `--batch -1` (default) lets Ultralytics choose the batch size for 60 % of GPU
   memory. Both 8 GB machines (development laptop and training PC) get batch 3 at 1280 px.
-- Duration: measure the first epoch before planning. References at 1280 px, batch 3,
-  `--workers 2`:
-  - development laptop (RTX 4060 Laptop): one epoch ~16 min of training plus validation;
-  - training PC (RTX 5060 Laptop), measured on 2026-11-06 on a synthetic stand-in of
-    `yolo_uav_gray` (600 train / 300 val grayscale JPEGs, 1920x1080 and 1280x720, same
-    training settings as `train_detector.py`): 24 train images/s and 78 val images/s in
-    steady state. That gives ~9 min of training plus ~1–2 min of validation per epoch on
-    the real set, so **~7–7.5 h for 40 epochs**. The synthetic JPEGs are about 5 times
-    larger than the real ones, so this estimate is on the pessimistic side; check it
-    against the first real epoch. Keep the laptop on mains power, in a performance power
-    mode, with sleep disabled.
+- Duration on `yolo_uav_gray` at 1280 px, batch 3, `--workers 2`:
+
+  | Machine | Train | Validation | Epoch | 40 epochs |
+  |---|---|---|---|---|
+  | Development laptop (RTX 4060 Laptop) | – | – | ~16 min | ~10.7 h |
+  | Training PC (RTX 5060 Laptop), measured 2026-11-06, first epoch of `yolo11s_uav_gray_1280_e40` | 8.9 min | 1.2 min | **10.1 min** (604 s in `results.csv`) | **~6.7 h** |
+
+  Starting or resuming a run adds about 45 s (AMP check, label cache, AutoBatch), and the
+  final test evaluation about 1.5 min. Before the first real epoch, a synthetic stand-in
+  of the dataset (larger JPEGs) had predicted 10–11 min per epoch. Keep the laptop on
+  mains power, in a performance power mode, with sleep disabled.
 - Do not let the PC sleep during training: stop the run with `--request-stop` and
   resume it instead (see above).
 - Test evaluation by hand, for example of a run resumed with plain Ultralytics instead of

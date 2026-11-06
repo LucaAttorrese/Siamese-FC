@@ -83,6 +83,6 @@ Fatto: copia della baseline C-UASP; port SiamFC validato offline (con copia dei 
 Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzione"):
 1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
 2. ✅ Dataset: ricostruiti con `datasets/MANIFEST.md` il 2026-11-06 (hash e conteggi verificati; zip conservati).
-3. Training di YOLO11s: circa 7–7,5 ore stimate per 40 epoche a 1280 px (batch 3). Misurare la prima epoca prima di confermare; poi valutazione sul test per sorgente.
+3. 🟡 Training di YOLO11s, run `yolo11s_uav_gray_1280_e40` (40 epoche a 1280 px, batch 3): 10,1 minuti per epoca misurati, circa 6,7 ore in tutto. Si esegue a tappe con `--request-stop` e `--resume`; il log cumulativo è in `runs/yolo11s_uav_gray_1280_e40.log` e le epoche fatte sono in `runs/detector/yolo11s_uav_gray_1280_e40/results.csv`. Poi valutazione sul test per sorgente.
 4. Fasi 3–4: `detector.py`, adapter `ids_siamfc`, settings e `cuasp.py`, con i relativi test.
 5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.
