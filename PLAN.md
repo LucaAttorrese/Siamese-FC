@@ -185,7 +185,7 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 ## Ordine di esecuzione (sul PC di training, RTX 5060 Laptop)
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
-2. 🟡 Ricostruzione dei dataset (`datasets/MANIFEST.md`), in corso il 2026-11-06.
+2. ✅ Ricostruzione dei dataset (`datasets/MANIFEST.md`) il 2026-11-06: hash e conteggi uguali al MANIFEST.
 3. Training del detector YOLO11s e valutazione sul test.
 4. `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.

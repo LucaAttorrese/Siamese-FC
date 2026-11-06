@@ -53,7 +53,11 @@ demo-sequences/vot15_bag/       sequenza demo per i controlli di regressione
 .\.venv\Scripts\python tools\bench_siamfc.py --weights ..\pretrained\networks\baseline-conv5_gray_e100.pth
 .\.venv\Scripts\python tools\eval_sequence.py ..\demo-sequences\vot15_bag --weights ..\pretrained\networks\baseline-conv5_gray_e100.pth --gray
 .\.venv\Scripts\python tools\train_detector.py --data ..\datasets\yolo_uav_gray\data.yaml --imgsz 1280 --epochs 40 --workers 2 --name yolo11s_uav_gray_1280_e40
+.\.venv\Scripts\python tools\train_detector.py --name yolo11s_uav_gray_1280_e40 --request-stop       # stop pulito a fine epoca
+.\.venv\Scripts\python tools\train_detector.py --data ..\datasets\yolo_uav_gray\data.yaml --name yolo11s_uav_gray_1280_e40 --resume --workers 2
 ```
+
+Stop e ripresa del training: `--request-stop` crea `runs/detector/<name>/STOP`. Il training finisce l'epoca in corso, salva `last.pt` ed esce con codice 3. Non usare `trainer.stop` né la fine normale di Ultralytics per fermare un run da riprendere: `final_eval()` chiama `strip_optimizer` su `last.pt` e la ripresa diventa impossibile.
 
 Riferimenti di regressione:
 - pytest: tutto verde tranne `test_multi_marker_fusion.py::test_settings_default_target_offsets_match_restored_rig_values`, che fallisce già in C-UASP;
@@ -66,7 +70,7 @@ Riferimenti di regressione:
 - **Script con worker su Windows**: qualsiasi script che lancia un training Ultralytics con `workers > 0` deve avere `if __name__ == "__main__":`, altrimenti i processi figli rieseguono lo script e il training si ferma con `RuntimeError` (`freeze_support`). `train_detector.py` è già a posto.
 - **torchvision solo CPU**: installare torch e torchvision dallo stesso indice CUDA **prima** di `ultralytics`. Altrimenti pip prende torchvision da PyPI e NMS fallisce su CUDA.
 - **OpenCV**: `ultralytics` installa anche `opencv-python` accanto a `opencv-contrib-python`. Controllare che `cv2.aruco` esista.
-- **Training su Windows**: i worker del dataloader impegnano circa 1.7 GB di memoria virtuale ciascuno, e la validazione ne usa il doppio. Con 4 worker il portatile è andato in `WinError 1455` e la validazione si è bloccata senza errori. Usare **`--workers 2`**; `last.pt` permette la ripresa (`YOLO(last.pt).train(resume=True)`).
+- **Training su Windows**: i worker del dataloader impegnano circa 1.7 GB di memoria virtuale ciascuno, e la validazione ne usa il doppio. Con 4 worker il portatile è andato in `WinError 1455` e la validazione si è bloccata senza errori. Usare **`--workers 2`**; la ripresa da `last.pt` si fa con `train_detector.py --resume`.
 - **Google Drive**: i file grandi possono dare "Quota exceeded" (pagina HTML di circa 2 KB al posto dello zip). Controllare dimensione e SHA256 di ogni download (`datasets/MANIFEST.md`).
 - **Fedeltà al riferimento MATLAB** (vedi README, "Known reference quirks"): crop centrati 1 px prima, `imresize` bicubica di MATLAB, ricerca del picco column-major. Sono riprodotti apposta: non "correggerli" senza misurarne l'effetto.
 - **Focale ambigua** (punto aperto ereditato da C-UASP): calibrazione a 2040x1536 contro acquisizione a 2592x1944, con fx ≈ 21 060 oppure ≈ 26 760 px. Va chiarito prima della validazione angolare.
@@ -78,7 +82,7 @@ Fatto: copia della baseline C-UASP; port SiamFC validato offline (con copia dei 
 
 Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzione"):
 1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
-2. 🟡 Dataset: ricostruiti con `datasets/MANIFEST.md` (in corso il 2026-11-06).
+2. ✅ Dataset: ricostruiti con `datasets/MANIFEST.md` il 2026-11-06 (hash e conteggi verificati; zip conservati).
 3. Training di YOLO11s: circa 7–7,5 ore stimate per 40 epoche a 1280 px (batch 3). Misurare la prima epoca prima di confermare; poi valutazione sul test per sorgente.
 4. Fasi 3–4: `detector.py`, adapter `ids_siamfc`, settings e `cuasp.py`, con i relativi test.
 5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.

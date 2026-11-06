@@ -151,6 +151,34 @@ resulting image counts are listed there.
 .\.venv\Scripts\python tools\train_detector.py --data ..\datasets\yolo_uav_gray\data.yaml --imgsz 1280 --epochs 40 --workers 2 --name yolo11s_uav_gray_1280_e40
 ```
 
+Stop and resume (details in the docstring of `tools/train_detector.py`):
+
+```powershell
+# clean stop at the end of the current epoch (from another terminal)
+.\.venv\Scripts\python tools\train_detector.py --name yolo11s_uav_gray_1280_e40 --request-stop
+# resume from the last completed epoch
+.\.venv\Scripts\python tools\train_detector.py --data ..\datasets\yolo_uav_gray\data.yaml --name yolo11s_uav_gray_1280_e40 --resume --workers 2
+```
+
+- `--request-stop` only creates the file `..\runs\detector\<name>\STOP`; creating it by
+  hand works the same. The training finishes the current epoch, including its
+  validation and the save of `weights\last.pt`, then exits with code 3 and prints the
+  resume command. The test evaluation is skipped, and `STOP` is deleted.
+- The request is ignored during the last epoch: a checkpoint of the final epoch cannot be
+  resumed, so the run simply finishes.
+- The clean stop deliberately bypasses Ultralytics' own end of training, which calls
+  `strip_optimizer` on `last.pt` and makes it impossible to resume.
+- `--resume` keeps the checkpoint's settings: epochs, image size, batch and seed. Only
+  `--workers` and `--patience` can be changed. When the run completes, the script
+  evaluates `best.pt` on the test split as for a run without interruptions.
+- A hard interruption (Ctrl+C, crash, power loss) loses only the epoch in progress, and
+  `--resume` works the same way. On Windows, Ctrl+C also reaches the dataloader workers,
+  so it is never a clean stop: use `--request-stop`.
+- A new run refuses a `--name` whose folder already exists. Otherwise Ultralytics would
+  silently train into `<name>2` and `STOP` would be looked for in the wrong folder.
+- Each completed epoch prints one `EPOCH_DONE {...}` line with train and validation
+  minutes, which is handy for monitoring.
+
 - Outputs go to `..\runs\detector\<name>\` (gitignored): `weights\best.pt`,
   `weights\last.pt`, `results.csv`, plots. When training ends, the script also
   evaluates `best.pt` on the test split.
@@ -172,16 +200,10 @@ resulting image counts are listed there.
     larger than the real ones, so this estimate is on the pessimistic side; check it
     against the first real epoch. Keep the laptop on mains power, in a performance power
     mode, with sleep disabled.
-- The run can be stopped at any time and resumed from the last completed epoch:
-
-  ```powershell
-  .\.venv\Scripts\python -c "from ultralytics import YOLO; YOLO(r'..\runs\detector\yolo11s_uav_gray_1280_e40\weights\last.pt').train(resume=True)"
-  ```
-
-  `last.pt` is written after each epoch's validation, so only the epoch in progress is
-  lost. Resuming keeps the original settings: epochs, image size and batch cannot be
-  changed. Do not let the PC sleep during training: stop the run and resume it instead.
-- Test evaluation of a resumed run (the resume command does not run it):
+- Do not let the PC sleep during training: stop the run with `--request-stop` and
+  resume it instead (see above).
+- Test evaluation by hand, for example of a run resumed with plain Ultralytics instead of
+  `--resume` (which runs the test evaluation itself):
 
   ```powershell
   .\.venv\Scripts\python -c "from ultralytics import YOLO; m = YOLO(r'..\runs\detector\yolo11s_uav_gray_1280_e40\weights\best.pt'); r = m.val(data=r'..\datasets\yolo_uav_gray\data.yaml', split='test', imgsz=1280); print(r.box.map50, r.box.map)"

@@ -56,7 +56,8 @@ zf.extractall("Anti-UAV300/Anti-UAV-RGBT",
               [n for n in zf.namelist() if not n.endswith("/") and ("/visible." in n or n.startswith("label_new/") or n == "framecut.py")])
 ```
 
-Then rebuild the detector training set (from `cuasp_siamfc/`, about 1 h on a laptop):
+Then rebuild the detector training set (from `cuasp_siamfc/`, about 1 h on the development
+laptop, 20 min on the training PC):
 
 ```bash
 .venv/Scripts/python tools/prepare_yolo_dataset.py --out ../datasets/yolo_uav_gray --anti-uav300 --anti-uav-stride 20
@@ -64,6 +65,11 @@ Then rebuild the detector training set (from `cuasp_siamfc/`, about 1 h on a lap
 
 Expected result (`yolo_uav_gray/counts.json`): dut 5200/2600/2200 and anti_uav300
 7499/3109/4280 images (train/val/test).
+
+Rebuilt on the training PC (RTX 5060 Laptop) on 2026-11-06 with this procedure: all six
+archives matched the sizes and SHA256 below (Google Drive at ~6–10 MB/s, about 20 min
+for 10.4 GB, no quota errors), and `counts.json` and the negatives per split matched
+the tables below exactly. The zip archives were kept on that machine.
 
 ## DUT-Anti-UAV
 
