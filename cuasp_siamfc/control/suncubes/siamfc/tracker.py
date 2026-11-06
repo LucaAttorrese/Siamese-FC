@@ -71,26 +71,43 @@ def matlab_round(value: float) -> int:
     return int(math.copysign(math.floor(abs(value) + 0.5), value))
 
 
+def crop_window(
+    img_hw: tuple[int, int], pos_yx: tuple[float, float], side: int
+) -> tuple[int, int, int, int, int, int]:
+    """Placement of a ``side`` x ``side`` crop centred on ``pos_yx`` (0-based), as in
+    ``get_subwindow_tracking.m``.
+
+    Returns ``(y0, x0, sy0, sy1, sx0, sx1)``: the crop's top-left corner in image
+    coordinates (it may be negative or extend past the image), and the in-image
+    part ``[sy0:sy1, sx0:sx1]`` (empty when ``sy1 <= sy0`` or ``sx1 <= sx0``).
+    """
+    side = int(side)
+    if side < 1:
+        raise ValueError("crop side must be >= 1")
+    h, w = int(img_hw[0]), int(img_hw[1])
+    c = (side + 1) / 2.0
+    # 1-based MATLAB: context_min = round(pos1 - c), pos1 = pos0 + 1 -> 0-based start = that - 1.
+    y0 = matlab_round(pos_yx[0] + 1.0 - c) - 1
+    x0 = matlab_round(pos_yx[1] + 1.0 - c) - 1
+    return y0, x0, max(0, y0), min(h, y0 + side), max(0, x0), min(w, x0 + side)
+
+
 def crop_with_padding(
     img: np.ndarray, pos_yx: tuple[float, float], side: int, fill: np.ndarray
 ) -> np.ndarray:
     """Square ``side`` x ``side`` crop centred on ``pos_yx`` (0-based), with out-of-image
     pixels set to ``fill``. Equivalent to the indexing part of
     ``get_subwindow_tracking.m``. Returns an (H, W, C) float32 array.
+
+    NumPy reference implementation: the tracker uses the equivalent
+    ``SiamFCTracker._crop_to_device`` (same ``crop_window``), which avoids building
+    the float32 crop on the CPU.
     """
     side = int(side)
-    if side < 1:
-        raise ValueError("crop side must be >= 1")
-    h, w = img.shape[:2]
     channels = 1 if img.ndim == 2 else img.shape[2]
-    c = (side + 1) / 2.0
-    # 1-based MATLAB: context_min = round(pos1 - c), pos1 = pos0 + 1 -> 0-based start = that - 1.
-    y0 = matlab_round(pos_yx[0] + 1.0 - c) - 1
-    x0 = matlab_round(pos_yx[1] + 1.0 - c) - 1
+    y0, x0, sy0, sy1, sx0, sx1 = crop_window(img.shape[:2], pos_yx, side)
     out = np.empty((side, side, channels), np.float32)
     out[...] = np.asarray(fill, np.float32).reshape(1, 1, channels)
-    sy0, sx0 = max(0, y0), max(0, x0)
-    sy1, sx1 = min(h, y0 + side), min(w, x0 + side)
     if sy1 > sy0 and sx1 > sx0:
         src = img[sy0:sy1, sx0:sx1]
         out[sy0 - y0:sy1 - y0, sx0 - x0:sx1 - x0] = src.reshape(sy1 - sy0, sx1 - sx0, channels)
@@ -148,13 +165,29 @@ class SiamFCTracker:
             return chw
         return self._mat(h, out_side) @ chw @ self._mat(w, out_side).T
 
+    def _crop_to_device(self, frame: np.ndarray, pos_yx: tuple[float, float], side: int) -> torch.Tensor:
+        """Same crop as ``crop_with_padding`` (same ``crop_window``), returned as a
+        (C, side, side) float32 tensor on the tracker device.
+
+        Only the in-image part of the frame is copied, in its own dtype (uint8 for the
+        IDS Mono8 frames, a quarter of the float32 volume). The padding with the
+        mean value and the conversion to float32 happen on the device. Values are
+        identical to the NumPy reference: uint8 -> float32 is exact.
+        """
+        channels = frame.shape[2]
+        y0, x0, sy0, sy1, sx0, sx1 = crop_window(frame.shape[:2], pos_yx, side)
+        out = self._fill.expand(channels, side, side).clone()
+        if sy1 > sy0 and sx1 > sx0:
+            src = torch.from_numpy(np.ascontiguousarray(frame[sy0:sy1, sx0:sx1])).to(self.device)
+            out[:, sy0 - y0:sy1 - y0, sx0 - x0:sx1 - x0] = src.permute(2, 0, 1).to(torch.float32)
+        return out
+
     def _scale_pyramid(self, frame: np.ndarray, pos_yx: tuple[float, float], in_sides: np.ndarray, out_side: int) -> torch.Tensor:
         """``make_scale_pyramid.m``: (S, C, out, out) float tensor in [0, 255]."""
         in_sides = np.array([matlab_round(v) for v in in_sides], dtype=np.int64)
         max_side, min_side = int(in_sides[-1]), int(in_sides[0])
         search_side = matlab_round(out_side * max_side / min_side)
-        region = crop_with_padding(frame, pos_yx, max_side, self._avg)
-        region_t = torch.from_numpy(region).to(self.device).permute(2, 0, 1)
+        region_t = self._crop_to_device(frame, pos_yx, max_side)
         region_t = self._resize(region_t, search_side)  # (C, search, search)
         centre = (search_side - 1) / 2.0  # 0-based form of (1 + search_side) / 2
         # Reference quirk, reproduced on purpose: get_subwindow_tracking.m places a
@@ -162,8 +195,7 @@ class SiamFCTracker:
         # before pos. For the largest scale this starts at index -1 of the
         # search region, and MATLAB pads that row/column with avgChans.
         # See crop_with_padding() and README "Known reference quirks".
-        fill = torch.as_tensor(self._avg, dtype=region_t.dtype, device=self.device).view(-1, 1, 1)
-        padded = fill.expand(-1, search_side + 2, search_side + 2).clone()
+        padded = self._fill.expand(region_t.shape[0], search_side + 2, search_side + 2).clone()
         padded[:, 1:-1, 1:-1] = region_t
         crops = []
         for side in in_sides:
@@ -204,6 +236,7 @@ class SiamFCTracker:
             raise ValueError("target size must be positive")
         p = self.p
         self._avg = frame.reshape(-1, frame.shape[2]).mean(axis=0).astype(np.float32)
+        self._fill = torch.as_tensor(self._avg, dtype=torch.float32, device=self.device).view(-1, 1, 1)
         self._pos = (float(center_xy[1]), float(center_xy[0]))
         self._size = (h, w)
         wc_z = w + p.context_amount * (w + h)
@@ -276,6 +309,7 @@ __all__ = [
     "SiamFCParams",
     "SiamFCResult",
     "SiamFCTracker",
+    "crop_window",
     "crop_with_padding",
     "displacement_in_frame",
     "hann_window",
