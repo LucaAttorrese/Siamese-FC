@@ -16,7 +16,7 @@ integration changes are made on these copies.
 |---|---|
 | SiamFC port (converter, network, tracker) | Done and validated offline (V1, V2, V5 below) |
 | Detector datasets (DUT-Anti-UAV, Anti-UAV300 → grayscale YOLO set) | Done, see `../datasets/MANIFEST.md` |
-| Detector training (YOLO11s) | In progress on the training PC (RTX 5060 Laptop): run `yolo11s_uav_gray_1280_e40`, trained in stages with stop/resume, 10.1 min per epoch (~6.7 h for 40 epochs, see §7). The first attempt on the development laptop stopped (out of virtual memory) |
+| Detector training (YOLO11s) | Done on the training PC (RTX 5060 Laptop), 2026-11-09: run `yolo11s_uav_gray_1280_e40`, 40 epochs in stages with stop/resume, ~10 min per epoch. `best.pt` (epoch 36, gitignored, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`): val mAP50 0.954 / mAP50-95 0.649; **test mAP50 0.949 / mAP50-95 0.593, P 0.962, R 0.869**. Per-source and per-size breakdown with `tools/eval_detector.py`: DUT mAP50 0.941 / mAP50-95 0.670, Anti-UAV300 0.959 / 0.546; recall at conf 0.25 drops on Anti-UAV300 boxes of 16–32 px (0.17) and 32–64 px (0.76), while DUT stays at 0.90–0.95 at every size |
 | Camera adapter `ids_siamfc` and its wiring into `cuasp.py` / `settings.py` | **Not implemented yet**: `control/cuasp.py` is still the unchanged C-UASP copy and runs the **ArUco** pipeline |
 | Validation on drone data, hyperparameter search, bench tests (V3, V4, V4b, V6–V8) | Not started |
 

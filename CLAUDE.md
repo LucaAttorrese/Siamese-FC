@@ -83,6 +83,6 @@ Fatto: copia della baseline C-UASP; port SiamFC validato offline (con copia dei 
 Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzione"):
 1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
 2. ✅ Dataset: ricostruiti con `datasets/MANIFEST.md` il 2026-11-06 (hash e conteggi verificati; zip conservati).
-3. 🟡 Training di YOLO11s, run `yolo11s_uav_gray_1280_e40` (40 epoche a 1280 px, batch 3): 10,1 minuti per epoca misurati, circa 6,7 ore in tutto. Si esegue a tappe con `--request-stop` e `--resume`; il log cumulativo è in `runs/yolo11s_uav_gray_1280_e40.log` e le epoche fatte sono in `runs/detector/yolo11s_uav_gray_1280_e40/results.csv`. Poi valutazione sul test per sorgente.
+3. 🟡 Training di YOLO11s ✅: run `yolo11s_uav_gray_1280_e40` completato il 2026-11-09 (40 epoche, circa 10 minuti l'una). Pesi in `runs/detector/yolo11s_uav_gray_1280_e40/weights/best.pt` (epoca 36, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`); log cumulativo in `runs/yolo11s_uav_gray_1280_e40.log`. Test complessivo: mAP50 0,949, mAP50-95 0,593, P 0,962, R 0,869. La suddivisione per sorgente e per dimensione (`tools/eval_detector.py`, risultati in PLAN Fase 2 punto 2) mostra il punto debole su Anti-UAV300 sotto i 64 px.
 4. Fasi 3–4: `detector.py`, adapter `ids_siamfc`, settings e `cuasp.py`, con i relativi test.
 5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.

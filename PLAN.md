@@ -56,8 +56,11 @@ Fatto:
 - script di training `tools/train_detector.py` (YOLO11s, imgsz 1280, augmentation di colore disattivata, seed fisso), con stop pulito a fine epoca (`--request-stop`) e ripresa (`--resume`), verificati end-to-end (2026-11-06).
 
 Da fare sul PC di training (RTX 5060 Laptop):
-1. 🟡 Primo training, run `yolo11s_uav_gray_1280_e40`: 40 epoche a 1280 px, batch 3, `--workers 2`, eseguito a tappe con stop e ripresa. Comando e avvertenze in `cuasp_siamfc/README.md` §7. Durata misurata sulla prima epoca (2026-11-06): **10,1 minuti** (8,9 di train e 1,2 di validazione), quindi **circa 6,7 ore** per 40 epoche. Epoca 1: mAP50 0,722, mAP50-95 0,413 in validazione (ancora in warm-up).
-2. Valutazione sul test, separata per sorgente (prefissi `dut_*` e `auav_*`), con attenzione ai droni piccoli.
+1. ✅ Primo training, run `yolo11s_uav_gray_1280_e40`: 40 epoche a 1280 px, batch 3, `--workers 2`, eseguito a tappe con stop e ripresa dal 2026-11-06 al 2026-11-09. Comando e avvertenze in `cuasp_siamfc/README.md` §7. Circa 10 minuti per epoca, costanti per tutto il run. `best.pt` = epoca 36 (val: mAP50 0,954, mAP50-95 0,649, P 0,947, R 0,907), SHA256 `3a7c1732…8040d5`. Nelle epoche 38–40 il val scende leggermente (mAP50-95 0,636 all'epoca 40), mentre il recall sale a 0,916. **Test complessivo** su `best.pt` (6480 immagini): **mAP50 0,949, mAP50-95 0,593, P 0,962, R 0,869**.
+2. ✅ Valutazione sul test, separata per sorgente (prefissi `dut_*` e `auav_*`) e per dimensione del drone: `tools/eval_detector.py` (2026-11-09), con output in `runs/detector/yolo11s_uav_gray_1280_e40_test_breakdown/breakdown.json`.
+   - Per sorgente (validazione di Ultralytics): DUT mAP50 0,941, mAP50-95 0,670, P 0,958, R 0,876; Anti-UAV300 mAP50 0,959, mAP50-95 0,546, P 0,937, R 0,925.
+   - Recall a IoU 0,5 con soglia 0,25, per lato del box in px originali. DUT è uniforme: 0,90–0,95 in tutte le fasce, anche sotto i 32 px. **Anti-UAV300 cala sui box medio-piccoli: 16–32 px 0,17 (46 box), 32–64 px 0,76 (797 box)**, contro 0,93–0,99 sopra i 64 px. Il punto debole è il dominio Anti-UAV300 sotto i 64 px, non i droni piccoli in generale: da capire se sono mancate detezioni vere o box predetti con IoU < 0,5 rispetto all'annotazione.
+   - Falsi allarmi sulle immagini senza drone (276, tutte Anti-UAV300): 14 con soglia 0,25, 6 con soglia 0,517.
 3. `control/suncubes/siamfc/detector.py`: interfaccia `DroneDetector` (Protocol) `detect(gray, roi_xywh | None) -> list[Detection(bbox_xywh, score)]`, sostituibile e simulabile nei test. Implementazione Ultralytics in PyTorch (niente ONNX per ora). Sui frame IDS da 5 MP va valutata l'inferenza a tasselli (tile 640 con sovrapposizione, ispirata a `MultiMarkerTiledPreprocessor` / `_next_scout_roi` in `camera.py`).
 4. In seguito: frame IDS registrati ed etichettati del rig, da aggiungere al dataset.
 
@@ -186,7 +189,7 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
 2. ✅ Ricostruzione dei dataset (`datasets/MANIFEST.md`) il 2026-11-06: hash e conteggi uguali al MANIFEST.
-3. 🟡 Training del detector YOLO11s (circa 6,7 ore, a tappe con stop e ripresa) e valutazione sul test.
+3. 🟡 Training del detector YOLO11s ✅ (completato il 2026-11-09, test complessivo mAP50 0,949 / mAP50-95 0,593). Valutazione per sorgente e per dimensione ✅ (vedi Fase 2, punto 2).
 4. `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.
