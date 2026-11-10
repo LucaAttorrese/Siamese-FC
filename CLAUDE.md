@@ -57,6 +57,9 @@ demo-sequences/vot15_bag/       sequenza demo per i controlli di regressione
 .\.venv\Scripts\python tools\train_detector.py --data ..\datasets\yolo_uav_gray\data.yaml --imgsz 1280 --epochs 40 --workers 2 --name yolo11s_uav_gray_1280_e40
 .\.venv\Scripts\python tools\train_detector.py --name yolo11s_uav_gray_1280_e40 --request-stop       # stop pulito a fine epoca
 .\.venv\Scripts\python tools\train_detector.py --data ..\datasets\yolo_uav_gray\data.yaml --name yolo11s_uav_gray_1280_e40 --resume --workers 2
+.\.venv\Scripts\python tools\eval_detector.py --weights ..\runs\detector\yolo11s_uav_gray_1280_e40\weights\best.pt --data ..\datasets\yolo_uav_gray\data.yaml
+# sorgente ids_siamfc completa su una sequenza registrata (DUT o IDS); --empty-scene per i falsi allarmi
+.\.venv\Scripts\python tools\replay_siamfc_source.py ..\datasets\DUT-Anti-UAV\tracking\Anti-UAV-Tracking-V0\video01 --gt ..\datasets\DUT-Anti-UAV\tracking\Anti-UAV-Tracking-V0GT\video01_gt.txt
 ```
 
 Stop e ripresa del training: `--request-stop` crea `runs/detector/<name>/STOP`. Il training finisce l'epoca in corso, salva `last.pt` ed esce con codice 3. Non usare `trainer.stop` né la fine normale di Ultralytics per fermare un run da riprendere: `final_eval()` chiama `strip_optimizer` su `last.pt` e la ripresa diventa impossibile.
@@ -86,5 +89,5 @@ Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzi
 1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
 2. ✅ Dataset: ricostruiti con `datasets/MANIFEST.md` il 2026-11-06 (hash e conteggi verificati; zip conservati).
 3. 🟡 Training di YOLO11s ✅: run `yolo11s_uav_gray_1280_e40` completato il 2026-11-09 (40 epoche, circa 10 minuti l'una). Pesi in `runs/detector/yolo11s_uav_gray_1280_e40/weights/best.pt` (epoca 36, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`); log cumulativo in `runs/yolo11s_uav_gray_1280_e40.log`. Test complessivo: mAP50 0,949, mAP50-95 0,593, P 0,962, R 0,869. La suddivisione per sorgente e per dimensione (`tools/eval_detector.py`, risultati in PLAN Fase 2 punto 2) mostra il punto debole su Anti-UAV300 sotto i 64 px. La diagnosi lo attribuisce a scene notturne con luci urbane, dove il drone viene rilevato ma con confidenza bassa (mediana 0,11): vedi PLAN.
-4. Fasi 3–4: `detector.py`, adapter `ids_siamfc`, settings e `cuasp.py`, con i relativi test.
+4. Fase 3 ✅ (`detector.py`, adapter `ids_siamfc`, routing; vedi PLAN). Prossimo: Fase 4, settings e `cuasp.py`, con i relativi test.
 5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.

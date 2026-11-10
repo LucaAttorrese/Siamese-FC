@@ -162,9 +162,10 @@ def main() -> int:
     neg_max_conf = {src: [] for src in SOURCES}
     for start in range(0, len(images), 64):
         chunk = images[start:start + 64]
-        # stream=True: results are yielded per batch instead of being accumulated; half=True like Ultralytics' val.
+        # stream=True: results are yielded per batch instead of being accumulated; fp16 (quantize=16) like
+        # Ultralytics' val (``half`` is deprecated in Ultralytics 8.4.2xx).
         # Without these, an 8 GB GPU filled up and Windows fell back to system memory (~30x slower).
-        results = model.predict([str(p) for p in chunk], imgsz=args.imgsz, conf=0.001, iou=0.7, max_det=300, batch=args.predict_batch, half=True, stream=True, verbose=False)
+        results = model.predict([str(p) for p in chunk], imgsz=args.imgsz, conf=0.001, iou=0.7, max_det=300, batch=args.predict_batch, quantize=16, stream=True, verbose=False)
         for path, res in zip(chunk, results):
             w, h = Image.open(path).size
             lbl = lbl_dir / f"{path.stem}.txt"

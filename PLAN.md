@@ -72,10 +72,54 @@ Da fare sul PC di training (RTX 5060 Laptop):
    - **Implicazioni.** L'ambiente operativo è al coperto e illuminato, quindi il caso notturno non è prioritario. In scene illuminate il detector è uniforme a tutte le dimensioni (DUT: recall 0,90–0,95). Resta valida per `detector.py` una soglia configurabile con conferma temporale. Lo script di diagnosi è stato eseguito una tantum (non è in repo).
    - **Divario di dominio.** I dataset di training sono tutti all'aperto, con droni su sfondo di cielo, mentre l'ambiente reale è al coperto: pareti, strutture, lampade e riflessi, con droni vicini e quindi grandi in pixel (con il teleobiettivo, fx ≈ 21 000–27 000 px, un drone di 35 cm a 10–20 m occupa circa 370–950 px). Le prestazioni misurate sul test non garantiscono quelle al coperto: i **frame IDS registrati ed etichettati nell'ambiente reale (punto 4) diventano la priorità** per valutare il detector e, se serve, per il fine-tuning.
    - Falsi allarmi sulle immagini senza drone (276, tutte Anti-UAV300): 14 con soglia 0,25, 6 con soglia 0,517.
-3. `control/suncubes/siamfc/detector.py`: interfaccia `DroneDetector` (Protocol) `detect(gray, roi_xywh | None) -> list[Detection(bbox_xywh, score)]`, sostituibile e simulabile nei test. Implementazione Ultralytics in PyTorch (niente ONNX per ora). Con il bersaglio previsto (Mavic Mini a 20–22 m, lato circa 130–340 px nel frame da 2592 px, quindi circa 65–170 px a imgsz 1280) basta l'inferenza sul frame intero ridimensionato. L'inferenza a tasselli (tile 640 con sovrapposizione, ispirata a `MultiMarkerTiledPreprocessor` / `_next_scout_roi` in `camera.py`) non serve, salvo bersagli molto più lontani o piccoli. Soglia di confidenza configurabile e conferma su N frame prima dell'inizializzazione di SiamFC (vedi diagnosi al punto 2).
+3. ✅ (2026-11-10) `control/suncubes/siamfc/detector.py`, con test in `tests/test_siamfc_detector.py` (31 test, uno con i pesi veri, saltato se i pesi mancano). Contiene:
+   - `Detection` e il protocollo `DroneDetector`;
+   - `UltralyticsDroneDetector`: frame intero o ROI, ridimensionamento del singolo canale Mono8 con `INTER_AREA` prima della replica su 3 canali, verifica SHA256 dei pesi, fp16 tramite `quantize=16`;
+   - `DetectionConfirmer`: conferma dopo N detezioni consecutive coerenti, misurate come spostamento del centro relativo alla dimensione del box, rapporto tra le dimensioni e intervallo di tempo massimo.
+
+   Coordinate in convenzione pixel-centro (come SiamFC e `cv2.undistortPoints`), convertite da quelle a bordi di Ultralytics. Latenza sul PC di training con frame da 2592x1944: **29 ms** sul frame intero (erano 55 ms replicando prima i canali sul frame da 5 MP) e 22 ms su una ROI 800x800; circa 8 ms sono overhead di `predict` di Ultralytics, eliminabile chiamando il modello direttamente se V5 mostrasse contesa sulla GPU con SiamFC.
+
+   Specifica originale: interfaccia `DroneDetector` (Protocol) `detect(gray, roi_xywh | None) -> list[Detection(bbox_xywh, score)]`, sostituibile e simulabile nei test. Implementazione Ultralytics in PyTorch (niente ONNX per ora). Con il bersaglio previsto (Mavic Mini a 20–22 m, lato circa 130–340 px nel frame da 2592 px, quindi circa 65–170 px a imgsz 1280) basta l'inferenza sul frame intero ridimensionato. L'inferenza a tasselli (tile 640 con sovrapposizione, ispirata a `MultiMarkerTiledPreprocessor` / `_next_scout_roi` in `camera.py`) non serve, salvo bersagli molto più lontani o piccoli. Soglia di confidenza configurabile e conferma su N frame prima dell'inizializzazione di SiamFC (vedi diagnosi al punto 2).
 4. **Prioritario** (vedi divario di dominio al punto 2): frame IDS registrati ed etichettati nell'ambiente operativo al coperto, prima come test set del detector e di SiamFC, poi eventualmente per il fine-tuning.
 
-## Fase 3 — Adapter camera ⏳ (`control/suncubes/siamfc_source.py`)
+## Fase 3 — Adapter camera ✅ (`control/suncubes/siamfc_source.py`, 2026-11-10)
+
+**Fatto.** `siamfc_source.py` con tre parti testabili separatamente:
+- `pixel_to_laser_angles`: geometria con Z fissa;
+- `SiamFCTrackingSession`: macchina a stati senza thread;
+- `IdsSiamFCCorrectionSourceAdapter`: producer IDS, thread `drone-detector`, gating e debug.
+
+Routing `ids_siamfc` in `camera.py::_build_source` (unica modifica a `camera.py`, più il commento sui modi in `CameraConfig`). Test in `tests/test_siamfc_source_adapter.py` (37 test, solo componenti simulati): un pixel sull'asse laser dà angoli nulli anche con rotazione, braccio di leva e distorsione; tutte le transizioni di stato; adapter end-to-end; routing e validazione della configurazione. Suite completa: 209 passati + 1 fallimento noto.
+
+Scelte rispetto alla specifica sotto, motivate da prove con i modelli veri:
+- **Confidenza**: media geometrica di `picco/picco_rif` e `APCE/APCE_rif`, ciascuno limitato a [0, 1]. I riferimenti sono le mediane dei primi 5 frame dopo ogni (re)inizializzazione, non il solo primo frame, che è gonfiato. Il picco grezzo può essere negativo fuori dal bersaglio. Sulla demo: circa 0,7 sul bersaglio, circa 0,07 fuori.
+- **Detection ritardate**: il tracker si inizializza sul frame su cui ha girato il detector e poi si aggiorna sul frame corrente.
+- **Verifica sul frame intero**, non su una ROI ritagliata. Una ROI di circa 300 px ingrandita a 1280 produceva falsi positivi enormi; reinizializzare su di essi faceva crescere box e ROI fino a seguire lo sfondo con confidenza alta. Ora la "ROI" è un raggio di ricerca, con controllo della dimensione (rapporto ≤ 1,5) e reinizializzazione solo dopo 2 verifiche concordi (`reinit_confirm`).
+- **Perdita non recuperabile dal tracker** se causata da verifica fallita o bersaglio fuori dal frame: in quel caso riparte solo un'acquisizione confermata. Il recupero autonomo resta solo per i cali di confidenza.
+- **Filtri anti-falsi positivi**: `acquire_min_score` 0,5 (da tarare in V4) e, nel detector, box scartati se più grandi di 0,3 del lato del frame (`max_box_frac`) o più piccoli di 4 px.
+- **Verifica a 5 Hz con 2 mancate** (`redetect_hz`, `verify_miss_limit`): un tracker scivolato sullo sfondo resta "affidabile" al massimo circa 0,4 s, contro 1,5 s con 2 Hz e 3 mancate.
+
+**Riproduzione con modelli veri** (SiamFC + YOLO, frame a 50 fps in tempo reale, sequenze DUT-Anti-UAV tracking). Frame affidabili sul drone giusto, su quelli con drone presente:
+
+| Video | Drone | Corretti | Bersaglio sbagliato | Drone assente |
+|---|---|---|---|---|
+| video01 | ~95 × 41 px | 81 % | 20 | 0 |
+| video05 | ~51 × 37 px | 91 % | 0 | 0 |
+| video10 | ~112 × 44 px | 94 % | 12 | 22 |
+| video15 | ~58 × 47 px | 73–76 % | 0–46 | 6–56 |
+
+Aggancio in 0,24–0,5 s. `read_candidate`: mediana circa 7,4 ms, p99 15,6–17,5 ms con il detector attivo, quindi oltre i 14,3 ms del budget a 70 Hz ma entro i 20 ms a 50 fps (da approfondire in V5). Il ritardo residuo, circa 0,4 s di frame sbagliati per ogni deriva, è il tempo della rete di sicurezza.
+
+**Strumento di riproduzione** `tools/replay_siamfc_source.py`. Fa girare l'intera sorgente `ids_siamfc` su una sequenza registrata (cartella di immagini o video, ground truth opzionale, calibrazione vera opzionale) a ritmo reale, e produce:
+- le metriche di sicurezza: frame affidabili corretti, sul bersaglio sbagliato e con drone assente, segmento pericoloso più lungo;
+- la copertura, l'errore del centro e i tempi di `read_candidate`;
+- un CSV per frame e un riepilogo JSON.
+
+L'opzione `--empty-scene` misura i falsi allarmi di una ripresa senza drone. Sarà lo strumento di V4 sulle registrazioni IDS.
+
+**Limite noto**: un falso positivo *persistente* del detector è indistinguibile, per la logica di tracking, da un drone in volo stazionario. In video15 un oggetto fisso con score 0,39–0,57 viene agganciato quando il drone è fuori inquadratura, a seconda che lo score superi 0,5. Si risolve al livello del detector: frame IDS dell'ambiente reale (anche a scena vuota, per misurarne i falsi positivi), soglia tarata su quei dati ed eventualmente zone da ignorare configurabili.
+
+Specifica originale (2026-10-06):
 
 Nuova classe `IdsSiamFCCorrectionSourceAdapter` che implementa `CorrectionSourcePort` (`start/stop/read_candidate/get_debug_snapshot/fast_stats`, `mode="ids_siamfc"`). **Riusa** da `suncubes/camera.py`, senza duplicarli:
 - `_IdsLatestFrameProducer`, `_load_vs_calibration_for_camera`, `_scale_intrinsics_to_runtime`;

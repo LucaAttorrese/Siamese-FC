@@ -17,7 +17,9 @@ integration changes are made on these copies.
 | SiamFC port (converter, network, tracker) | Done and validated offline (V1, V2, V5 below) |
 | Detector datasets (DUT-Anti-UAV, Anti-UAV300 → grayscale YOLO set) | Done, see `../datasets/MANIFEST.md` |
 | Detector training (YOLO11s) | Done on the training PC (RTX 5060 Laptop), 2026-11-09: run `yolo11s_uav_gray_1280_e40`, 40 epochs in stages with stop/resume, ~10 min per epoch. `best.pt` (epoch 36, gitignored, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`): val mAP50 0.954 / mAP50-95 0.649; **test mAP50 0.949 / mAP50-95 0.593, P 0.962, R 0.869**. Per-source and per-size breakdown with `tools/eval_detector.py`: DUT mAP50 0.941 / mAP50-95 0.670, Anti-UAV300 0.959 / 0.546; recall at conf 0.25 drops on Anti-UAV300 boxes of 16–32 px (0.17) and 32–64 px (0.76), while DUT stays at 0.90–0.95 at every size |
-| Camera adapter `ids_siamfc` and its wiring into `cuasp.py` / `settings.py` | **Not implemented yet**: `control/cuasp.py` is still the unchanged C-UASP copy and runs the **ArUco** pipeline |
+| Drone detector module (`control/suncubes/siamfc/detector.py`) | Done: `DroneDetector` protocol, Ultralytics implementation (full frame or ROI, SHA256 check of the weights), `DetectionConfirmer` (N consistent detections before a target is confirmed). 29 ms per full 2592x1944 frame on the training PC |
+| Camera adapter `ids_siamfc` (`control/suncubes/siamfc_source.py`) | Done: tracking state machine (searching / tracking / lost), fixed-Z geometry, full-frame detector verification, routing `provider_mode = "ids_siamfc"` in `camera.py`. Replayed with the real models on DUT-Anti-UAV tracking videos (details and known limitation in `../PLAN.md`, Phase 3) |
+| Wiring into `cuasp.py` / `settings.py` (Phase 4) | **Not implemented yet**: `control/cuasp.py` still builds the ArUco configuration and runs the **ArUco** pipeline |
 | Validation on drone data, hyperparameter search, bench tests (V3, V4, V4b, V6–V8) | Not started |
 
 ## Using this repository on the training PC
@@ -325,10 +327,15 @@ Differences from the original SiamFC that the port follows (reference code:
 
 ```
 control/suncubes/siamfc/      new: SiamFC port (convert_matconvnet, net, tracker, imresize)
+                              and drone detector for init/re-acquisition (detector)
 tools/eval_sequence.py        new: VOT-format sequence evaluation (accuracy + latency)
 tools/bench_siamfc.py         new: latency benchmark on IDS-sized Mono8 frames
 tools/prepare_yolo_dataset.py new: builds the grayscale YOLO detector dataset
-tools/train_detector.py       new: detector training (Ultralytics YOLO)
+tools/train_detector.py       new: detector training (Ultralytics YOLO), with clean stop/resume
+tools/eval_detector.py        new: detector test breakdown by source and drone size
+tools/replay_siamfc_source.py new: replays a recorded sequence (images or video, optional GT) through
+                              the full ids_siamfc source in real time: safety metrics, per-frame CSV
+control/suncubes/siamfc_source.py  new: ids_siamfc camera correction source (SiamFC + detector)
 control/cuasp.py, suncubes/   copies of C-UASP (integration changes go here)
 calibration/                  copies of the C-UASP calibration YAMLs (read-only)
 tests/                        copied C-UASP tests + new SiamFC tests

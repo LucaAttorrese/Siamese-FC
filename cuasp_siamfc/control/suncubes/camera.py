@@ -100,7 +100,7 @@ class RuntimeConfig:
 @dataclass(frozen=True)
 class CameraConfig:
     enable: bool = False
-    mode: str = "csv"  # csv | ids_opencv
+    mode: str = "csv"  # csv | ids_opencv | ids_siamfc (cuasp_siamfc)
     csv_path: str = ""
     gating: GatingConfig = GatingConfig()
     runtime: RuntimeConfig = RuntimeConfig()
@@ -3277,6 +3277,12 @@ def _build_source(cfg: CameraConfig) -> CorrectionSourcePort:
         if target_ids is not None and len(list(target_ids)) > 1:
             return MultiArucoCorrectionSourceAdapter(ids_cfg, cfg.gating)
         return IdsOpenCvCorrectionSourceAdapter(ids_cfg, cfg.gating)
+    if cfg.mode == "ids_siamfc":
+        # cuasp_siamfc: SiamFC tracker + drone detector instead of ArUco/PnP. Lazy import so
+        # torch / ultralytics are only needed when this mode is selected. The adapter takes the
+        # same dict as ids_opencv (ids_peak, calibration, debug_view) plus "siamfc" and "detector".
+        from .siamfc_source import IdsSiamFCCorrectionSourceAdapter
+        return IdsSiamFCCorrectionSourceAdapter(cfg.ids_opencv or {}, cfg.gating)
     raise ValueError(f"Unsupported camera provider_mode: {cfg.mode}")
 
 
