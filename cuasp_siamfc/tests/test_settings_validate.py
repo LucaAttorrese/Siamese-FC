@@ -71,3 +71,42 @@ def test_multiple_errors_are_all_reported_together(monkeypatch):
     message = str(excinfo.value)
     assert "PORT" in message
     assert "CV_CUAS_KLT_WIN_SIZE" in message
+
+
+# ---------------------------------------------------------------------------- cuasp_siamfc block
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CV_TARGET_TRACKER", "kcf"),
+        ("CV_SIAMFC_WEIGHTS_PATH", ""),
+        ("CV_DETECTOR_WEIGHTS_PATH", None),
+        ("CV_SIAMFC_WEIGHTS_SHA256", "abc"),
+        ("CV_DETECTOR_WEIGHTS_SHA256", "z" * 64),
+        ("CV_SIAMFC_PARAMS", "fast"),
+        ("CV_SIAMFC_TARGET_RANGE_M", 0.0),
+        ("CV_SIAMFC_TARGET_RANGE_M", float("nan")),
+        ("CV_SIAMFC_CONF_MIN", 1.0),
+        ("CV_SIAMFC_LOST_CONF", 0.0),
+        ("CV_DETECTOR_CONF_MIN", "high"),
+        ("CV_SIAMFC_LOST_FRAMES", 0),
+        ("CV_SIAMFC_REINIT_CONFIRM", 2.5),
+        ("CV_DETECTOR_CONFIRM_FRAMES", True),
+        ("CV_SIAMFC_REDETECT_HZ", -1.0),
+        ("CV_DETECTOR_IMGSZ", 0),
+        ("CV_SIAMFC_BBOX_OFFSET_PX", (0.0,)),
+        ("CV_SIAMFC_BBOX_OFFSET_PX", (0.0, float("inf"))),
+    ],
+)
+def test_bad_siamfc_settings_are_rejected(monkeypatch, name, value):
+    monkeypatch.setattr(settings, name, value)
+    with pytest.raises(ValueError, match=name):
+        settings.validate()
+
+
+def test_siamfc_settings_accept_empty_hash_and_params_dict(monkeypatch):
+    monkeypatch.setattr(settings, "CV_SIAMFC_WEIGHTS_SHA256", "")
+    monkeypatch.setattr(settings, "CV_SIAMFC_PARAMS", {"scale_step": 1.04})
+    monkeypatch.setattr(settings, "CV_TARGET_TRACKER", "aruco")
+    settings.validate()

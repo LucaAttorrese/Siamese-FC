@@ -136,7 +136,28 @@ Thread: SiamFC nel `camera-api-worker`, YOLO solo nel thread `drone-detector`; i
 
 Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siamfc"`, con import lazy. È l'unica modifica a `camera.py`.
 
-## Fase 4 — Integrazione in `cuasp.py` e `settings.py` ⏳
+## Fase 4 — Integrazione in `cuasp.py` e `settings.py` 🟡 (2026-11-10)
+
+**Fatto.**
+- **`settings.py`**:
+  - `CV_TARGET_TRACKER = "siamfc"` di default (decisione del 2026-11-10);
+  - tutti i parametri `CV_SIAMFC_*` e `CV_DETECTOR_*`: pesi con SHA256, Z fissa 21 m, `CV_SIAMFC_CONF_MIN` 0,15 come soglia di gating dedicata (quella ArUco, 0,0005, è tarata sull'area del marker), macchina a stati, filtri del detector;
+  - controlli di tipo e intervallo in `validate()`;
+  - **`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`** di default (era 1 in C-UASP; decisione del 2026-11-10).
+- **`cuasp.py`**:
+  - `_build_camera_config()` sceglie `ids_siamfc` e passa i dict `siamfc`/`detector`, con i percorsi risolti rispetto a `cuasp_siamfc/`;
+  - `_validate_configuration()` salta i controlli ArUco e valida la configurazione completa della sorgente, inclusi i controlli incrociati;
+  - nel banner: modalità, Z fissa, percorsi dei pesi e SHA256 effettivamente caricati;
+  - nel debug: box SiamFC colorato per stato, detezioni, riga di stato al posto di "PBVS target camera: N/A", laser "fixed @21 m";
+  - messaggio `target lost`;
+  - **nessuna modifica** a PBVS, segni, clamp e dispatcher.
+- `pyproject.toml`: extra `siamfc` con torchvision e ultralytics.
+- Test: routing e configurazione SiamFC, controllo che ogni parametro `CV_SIAMFC_*`/`CV_DETECTOR_*` arrivi alla sorgente, validazione, frame di debug, nuovi controlli di `settings.validate()`. Test end-to-end `tests/test_cuasp_siamfc_e2e.py`: sorgente SiamFC con componenti simulati → `CameraAPI` → `cuasp.main()` → dispatcher → `FakePCMMServer`, con comandi `abs[0,1]` di segno e valore attesi e stop su perdita.
+- Avvio reale della sorgente dai settings con i pesi veri: percorsi risolti e SHA256 corrispondenti.
+
+**Aperto: corsa nel dispatcher ereditato da C-UASP** (trovata dal test end-to-end, 2 esecuzioni su 10). Quando la perdita arriva mentre un `abs_rotate` è già in corso, lo stop parte da un task separato (`asyncio.create_task(self.motors.stop)` in `MotorCommandDispatcher.submit`). Se vince la corsa sul lock TCP, sul cavo passa `stop[0]=1` seguito dall'`abs[0,1]` già in volo, calcolato dall'ultimo campione valido: lo stop viene annullato. Vale anche in modalità ArUco. Decisione dell'utente in sospeso.
+
+Specifica originale:
 
 - `settings.py`:
   - `CV_TARGET_TRACKER = "aruco" | "siamfc"`;
@@ -167,7 +188,7 @@ Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siam
 | V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame (14.3 ms a 70 Hz, 20 ms a 50 fps) con il detector attivo | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5060 Laptop (PC di training): 5.9–8.1 ms medi, p99 ≤ 9.2 ms. Manca la misura con il detector attivo sulla stessa GPU |
 | V6 pytest | Suite in `cuasp_siamfc/tests` | Tutto verde; senza torch i test SiamFC vengono saltati, non falliscono | 🟡 Verde, a parte il test ArUco già rotto in C-UASP |
 | V7 banco, motori spenti | IDS dal vivo con `CV_CUAS_ENABLE_MOTOR_COMMANDS=0`. Drone **con ArUco montati**: la pipeline ArUco registrata fa da riferimento offline per SiamFC sugli stessi frame | Differenza angolare entro un budget da concordare; segni az/po corretti | ⏳ |
-| V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1` | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
+| V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1`. **Promemoria (richiesto dall'utente il 2026-11-10): i comandi motore sono disabilitati di default (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`); vanno abilitati esplicitamente solo per questa prova, ricordandolo all'utente prima di iniziare.** Prima di V8 va risolta la corsa stop/`abs` del dispatcher (Fase 4) | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
 
 ### V4b — Ricerca degli iperparametri del tracker
 

@@ -38,9 +38,14 @@ calibration = [
 #         torch 2.14.1+cu130, Python 3.13.17, Windows 11, RTX 5060 Laptop.
 # On Windows use Python >= 3.13: 3.12 has a 16 ms time.monotonic() step.
 # scipy is only needed by the offline converter (suncubes.siamfc.convert_matconvnet).
+# ultralytics runs the drone detector (AGPL-3.0, accepted for validation; see README).
+# Install torch and torchvision from the CUDA index BEFORE ultralytics (README §3).
+# Since 2026-11-10 settings.CV_TARGET_TRACKER defaults to "siamfc": cuasp.py needs this extra.
 siamfc = [
     "torch",
+    "torchvision",
     "scipy",
+    "ultralytics",
 ]
 
 [tool.setuptools]

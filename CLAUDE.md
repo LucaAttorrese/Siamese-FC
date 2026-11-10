@@ -11,6 +11,7 @@ Il piano dettagliato, con lo stato di ogni fase, è in [PLAN.md](PLAN.md). La pr
 - **Nessuna operazione git che modifichi lo stato** (commit, branch, checkout, push, reset, ...) **senza un permesso esplicito dato in quel momento.** Anche se un piano dice "commit", chiedere. Comandi git in sola lettura (`status`, `diff`, `log`) sono liberi. I commit e i push li fa l'utente.
 - **La repository C-UASP non si modifica mai.** Se presente sulla macchina, si legge soltanto. Il lavoro avviene sulle copie in `cuasp_siamfc/` (provenienza e hash in `cuasp_siamfc/PROVENANCE.md`).
 - **Sicurezza** (sistema di puntamento fisico, regole di C-UASP): non indebolire limiti, clamp, controlli di freschezza del campione o stop su perdita; nessuna conversione di unità implicita. Le prove dal vivo partono con `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`.
+- **Motori disabilitati di default** (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` in `settings.py`, decisione del 2026-11-10). **Quando si arriva alla prova con motori abilitati (V8), ricordarlo all'utente prima di iniziare:** vanno abilitati esplicitamente e solo per quella prova.
 - Prima di comandi lunghi o costosi (training, download di GB, ricerche di iperparametri) indicare durata e spazio previsti. I processi lunghi vanno in background, con un controllo che si fermi anche in caso di errore.
 - Le proposte P1–P4 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle.
 
@@ -89,5 +90,5 @@ Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzi
 1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
 2. ✅ Dataset: ricostruiti con `datasets/MANIFEST.md` il 2026-11-06 (hash e conteggi verificati; zip conservati).
 3. 🟡 Training di YOLO11s ✅: run `yolo11s_uav_gray_1280_e40` completato il 2026-11-09 (40 epoche, circa 10 minuti l'una). Pesi in `runs/detector/yolo11s_uav_gray_1280_e40/weights/best.pt` (epoca 36, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`); log cumulativo in `runs/yolo11s_uav_gray_1280_e40.log`. Test complessivo: mAP50 0,949, mAP50-95 0,593, P 0,962, R 0,869. La suddivisione per sorgente e per dimensione (`tools/eval_detector.py`, risultati in PLAN Fase 2 punto 2) mostra il punto debole su Anti-UAV300 sotto i 64 px. La diagnosi lo attribuisce a scene notturne con luci urbane, dove il drone viene rilevato ma con confidenza bassa (mediana 0,11): vedi PLAN.
-4. Fase 3 ✅ (`detector.py`, adapter `ids_siamfc`, routing; vedi PLAN). Prossimo: Fase 4, settings e `cuasp.py`, con i relativi test.
+4. Fase 3 ✅ (`detector.py`, adapter `ids_siamfc`, routing). Fase 4 🟡: `settings.py` e `cuasp.py` fatti (SiamFC di default, motori disabilitati di default); aperta la corsa stop/`abs` nel dispatcher (vedi PLAN, Fase 4).
 5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.

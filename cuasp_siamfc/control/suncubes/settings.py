@@ -271,6 +271,68 @@ CV_CUAS_MAX_AGE_S = 0.25  # s
 
 
 # =============================================================================
+# Target tracker: SiamFC + drone detector (cuasp_siamfc, PLAN.md Phases 3-4)
+# =============================================================================
+
+# "siamfc": visual tracking of the drone itself (camera.py provider_mode
+# "ids_siamfc", suncubes/siamfc_source.py). "aruco": the original C-UASP
+# ArUco/PnP pipeline, unchanged. Default "siamfc" (decision of 2026-11-10).
+CV_TARGET_TRACKER = "siamfc"
+
+# Weights. Paths are relative to cuasp_siamfc/ (like CV_CAMERA_CALIBRATION_YAML)
+# or absolute. When a SHA256 is set, start-up refuses a file whose hash differs;
+# "" disables the check. The SiamFC .pth hash is the one written by
+# suncubes.siamfc.convert_matconvnet on the training PC (2026-11-06); a .pth
+# converted on another machine may differ byte-wise -- then update it here.
+CV_SIAMFC_WEIGHTS_PATH = "../pretrained/networks/baseline-conv5_gray_e100.pth"
+CV_SIAMFC_WEIGHTS_SHA256 = "d858fec57757d1fa6eb5c9c3163b826d0337298aa91f68247bf9522562cfbb6f"
+CV_DETECTOR_WEIGHTS_PATH = "../runs/detector/yolo11s_uav_gray_1280_e40/weights/best.pt"
+CV_DETECTOR_WEIGHTS_SHA256 = "3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5"
+
+# SiamFC tracker.
+CV_SIAMFC_DEVICE = ""  # "" = cuda when available, else cpu
+CV_SIAMFC_PARAMS = "paper"  # "paper" (CFNet Table 2) or a dict of SiamFCParams overrides (from V4b)
+# Fixed camera depth Z used to back-project the target pixel (no range sensor):
+# centre of the expected 20-22 m. Parallax error for Z_true in 20..22 m is
+# |t_lc| * |1/Z_true - 1/Z| <= ~0.43 mrad with the 18 cm lever arm.
+CV_SIAMFC_TARGET_RANGE_M = 21.0
+# Gating confidence for SiamFC samples (replaces CV_ARUCO_CONFIDENCE_MIN, which
+# is calibrated on the ArUco marker-area confidence, in siamfc mode).
+CV_SIAMFC_CONF_MIN = 0.15
+CV_SIAMFC_BBOX_OFFSET_PX = (0.0, 0.0)  # aim pixel = tracked box centre + this offset
+
+# Tracking state machine (siamfc_source.SessionConfig; see its comments).
+# To be tuned in V4 on IDS recordings with tools/replay_siamfc_source.py.
+CV_SIAMFC_LOST_CONF = 0.25
+CV_SIAMFC_LOST_FRAMES = 5
+CV_SIAMFC_MAX_LOST_S = 1.0
+CV_SIAMFC_REF_FRAMES = 5
+CV_SIAMFC_MISSING_HZ = 10.0  # full-frame detection while searching / lost
+CV_SIAMFC_ACQUIRE_MIN_SCORE = 0.5
+CV_SIAMFC_REDETECT_HZ = 5.0  # verification while tracking
+CV_SIAMFC_VERIFY_RADIUS = 1.5
+CV_SIAMFC_VERIFY_RADIUS_MIN_PX = 128.0
+CV_SIAMFC_VERIFY_MAX_SIZE_RATIO = 1.5
+CV_SIAMFC_REINIT_IOU = 0.5
+CV_SIAMFC_REINIT_CONFIRM = 2
+CV_SIAMFC_VERIFY_MISS_LIMIT = 2
+
+# Drone detector (siamfc.detector.DetectorConfig / ConfirmerConfig).
+CV_DETECTOR_DEVICE = ""  # "" = Ultralytics default (first CUDA GPU when available)
+CV_DETECTOR_CONF_MIN = 0.15
+CV_DETECTOR_IMGSZ = 1280
+CV_DETECTOR_NMS_IOU = 0.7
+CV_DETECTOR_MAX_DET = 10
+CV_DETECTOR_FP16 = 1
+CV_DETECTOR_MAX_BOX_FRAC = 0.3  # boxes larger than this fraction of the frame's larger side are dropped
+CV_DETECTOR_MIN_BOX_PX = 4.0
+CV_DETECTOR_CONFIRM_FRAMES = 3  # consistent full-frame detections needed to start a track
+CV_DETECTOR_CONFIRM_MAX_SHIFT = 1.0
+CV_DETECTOR_CONFIRM_MAX_SIZE_RATIO = 1.5
+CV_DETECTOR_CONFIRM_MAX_GAP_S = 0.5
+
+
+# =============================================================================
 # Runtime / debug (control/cuasp.py)
 # =============================================================================
 
@@ -285,7 +347,11 @@ CV_CUAS_DEBUG_DISPLAY_SCALE = 0.33
 # Motor safety switch / network / dispatch timing (control/cuasp.py)
 # =============================================================================
 
-CV_CUAS_ENABLE_MOTOR_COMMANDS = 1
+# cuasp_siamfc: 0 by default (decision of 2026-11-10; was 1 in C-UASP), so a first
+# SiamFC run cannot move the motors by mistake. The C-UASP safety rules require live
+# tests to start with motor commands disabled. Enable only for the motors-on bench
+# test (PLAN.md, V8), deliberately.
+CV_CUAS_ENABLE_MOTOR_COMMANDS = 0
 IP = "192.168.0.109"
 PORT = 8123
 CV_CUAS_MOTOR_COMMAND_HZ = 50.0
@@ -406,6 +472,52 @@ def validate() -> None:
 
     if len(set(CV_ARUCO_TARGET_IDS)) != len(CV_ARUCO_TARGET_IDS):
         errors.append("CV_ARUCO_TARGET_IDS must not contain duplicate ids")
+
+    # Target tracker / SiamFC block: types and obvious ranges only. The complete,
+    # cross-field validation is SiamFCSourceConfig.validate(), run by cuasp.py's
+    # _validate_configuration() in siamfc mode. The weight files themselves are
+    # checked (existence, SHA256) when the camera source starts.
+    if CV_TARGET_TRACKER not in {"aruco", "siamfc"}:
+        errors.append(f"CV_TARGET_TRACKER must be 'aruco' or 'siamfc', got {CV_TARGET_TRACKER!r}")
+    for name in ("CV_SIAMFC_WEIGHTS_PATH", "CV_DETECTOR_WEIGHTS_PATH"):
+        if not isinstance(globals()[name], str) or not globals()[name].strip():
+            errors.append(f"{name} must be a non-empty path string")
+    for name in ("CV_SIAMFC_WEIGHTS_SHA256", "CV_DETECTOR_WEIGHTS_SHA256"):
+        value = globals()[name]
+        if not isinstance(value, str) or (value and (len(value) != 64 or any(c not in "0123456789abcdefABCDEF" for c in value))):
+            errors.append(f"{name} must be '' or a 64-character hex SHA256, got {value!r}")
+    if not (CV_SIAMFC_PARAMS == "paper" or isinstance(CV_SIAMFC_PARAMS, dict)):
+        errors.append("CV_SIAMFC_PARAMS must be 'paper' or a dict of SiamFCParams overrides")
+    for name in (
+        "CV_SIAMFC_TARGET_RANGE_M", "CV_SIAMFC_MAX_LOST_S", "CV_SIAMFC_MISSING_HZ", "CV_SIAMFC_VERIFY_RADIUS",
+        "CV_SIAMFC_VERIFY_MAX_SIZE_RATIO", "CV_SIAMFC_REINIT_IOU", "CV_DETECTOR_IMGSZ", "CV_DETECTOR_NMS_IOU",
+        "CV_DETECTOR_MAX_BOX_FRAC", "CV_DETECTOR_CONFIRM_MAX_SHIFT", "CV_DETECTOR_CONFIRM_MAX_SIZE_RATIO",
+        "CV_DETECTOR_CONFIRM_MAX_GAP_S",
+    ):
+        _positive(name, globals()[name])
+    for name in ("CV_SIAMFC_REDETECT_HZ", "CV_SIAMFC_VERIFY_RADIUS_MIN_PX", "CV_SIAMFC_ACQUIRE_MIN_SCORE", "CV_DETECTOR_MIN_BOX_PX"):
+        _non_negative(name, globals()[name])
+    for name in ("CV_SIAMFC_CONF_MIN", "CV_SIAMFC_LOST_CONF", "CV_DETECTOR_CONF_MIN"):
+        value = globals()[name]
+        try:
+            ok = 0.0 < float(value) < 1.0
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            errors.append(f"{name} must be in (0, 1), got {value!r}")
+    for name in (
+        "CV_SIAMFC_LOST_FRAMES", "CV_SIAMFC_REF_FRAMES", "CV_SIAMFC_REINIT_CONFIRM", "CV_SIAMFC_VERIFY_MISS_LIMIT",
+        "CV_DETECTOR_MAX_DET", "CV_DETECTOR_CONFIRM_FRAMES",
+    ):
+        value = globals()[name]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            errors.append(f"{name} must be an integer >= 1, got {value!r}")
+    try:
+        offset_ok = len(CV_SIAMFC_BBOX_OFFSET_PX) == 2 and all(math.isfinite(float(v)) for v in CV_SIAMFC_BBOX_OFFSET_PX)
+    except (TypeError, ValueError):
+        offset_ok = False
+    if not offset_ok:
+        errors.append(f"CV_SIAMFC_BBOX_OFFSET_PX must contain exactly two finite numbers, got {CV_SIAMFC_BBOX_OFFSET_PX!r}")
 
     if errors:
         raise ValueError("Invalid suncubes.settings:\n- " + "\n- ".join(errors))

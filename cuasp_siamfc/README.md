@@ -19,7 +19,7 @@ integration changes are made on these copies.
 | Detector training (YOLO11s) | Done on the training PC (RTX 5060 Laptop), 2026-11-09: run `yolo11s_uav_gray_1280_e40`, 40 epochs in stages with stop/resume, ~10 min per epoch. `best.pt` (epoch 36, gitignored, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`): val mAP50 0.954 / mAP50-95 0.649; **test mAP50 0.949 / mAP50-95 0.593, P 0.962, R 0.869**. Per-source and per-size breakdown with `tools/eval_detector.py`: DUT mAP50 0.941 / mAP50-95 0.670, Anti-UAV300 0.959 / 0.546; recall at conf 0.25 drops on Anti-UAV300 boxes of 16–32 px (0.17) and 32–64 px (0.76), while DUT stays at 0.90–0.95 at every size |
 | Drone detector module (`control/suncubes/siamfc/detector.py`) | Done: `DroneDetector` protocol, Ultralytics implementation (full frame or ROI, SHA256 check of the weights), `DetectionConfirmer` (N consistent detections before a target is confirmed). 29 ms per full 2592x1944 frame on the training PC |
 | Camera adapter `ids_siamfc` (`control/suncubes/siamfc_source.py`) | Done: tracking state machine (searching / tracking / lost), fixed-Z geometry, full-frame detector verification, routing `provider_mode = "ids_siamfc"` in `camera.py`. Replayed with the real models on DUT-Anti-UAV tracking videos (details and known limitation in `../PLAN.md`, Phase 3) |
-| Wiring into `cuasp.py` / `settings.py` (Phase 4) | **Not implemented yet**: `control/cuasp.py` still builds the ArUco configuration and runs the **ArUco** pipeline |
+| Wiring into `cuasp.py` / `settings.py` (Phase 4) | Done: `CV_TARGET_TRACKER = "siamfc"` (default) selects the SiamFC source; all `CV_SIAMFC_*` / `CV_DETECTOR_*` settings, validated at start-up; SiamFC box in the debug window; weight hashes in the banner. Motor commands disabled by default. End-to-end test against the fake PCMM server (`tests/test_cuasp_siamfc_e2e.py`) |
 | Validation on drone data, hyperparameter search, bench tests (V3, V4, V4b, V6–V8) | Not started |
 
 ## Using this repository on the training PC
@@ -213,17 +213,26 @@ Stop and resume (details in the docstring of `tools/train_detector.py`):
 
 ### 8. Live runtime with the IDS camera
 
-The SiamFC camera adapter is **not implemented yet** (see "Project status"), so
-running `control\cuasp.py` today runs the unchanged C-UASP **ArUco** pipeline on the
-copied files. Before any live run on the new PC:
+`control\cuasp.py` runs the **SiamFC** pipeline by default
+(`CV_TARGET_TRACKER = "siamfc"` in `control\suncubes\settings.py`, camera
+`provider_mode = "ids_siamfc"`); set it to `"aruco"` for the original C-UASP ArUco
+pipeline. In SiamFC mode `cuasp.py` needs the `siamfc` extra (torch, torchvision,
+ultralytics; step 3), the SiamFC weights (step 4) and the detector weights (step 7). The
+start-up banner prints the weight paths and the SHA256 actually loaded; a hash that does
+not match `CV_SIAMFC_WEIGHTS_SHA256` / `CV_DETECTOR_WEIGHTS_SHA256` stops the start-up
+(set the setting to `""` to skip the check, or update it after converting the weights on
+another machine). The fixed range for the parallax correction is
+`CV_SIAMFC_TARGET_RANGE_M` (21 m). Before any live run:
 
 - install the IDS peak SDK and its Python bindings into the venv, following the IDS
   instructions. Set `CV_IDS_GENTL_CTI_PATH` in `control\suncubes\settings.py` if the
   SDK needs an explicit GenTL producer path;
 - check the network settings of the motor controller: `IP` / `PORT` in
   `control\suncubes\settings.py` (currently `192.168.0.109:8123`);
-- start with motor commands **disabled**: `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` in
-  `settings.py` (currently 1), as required by the C-UASP safety rules;
+- motor commands are **disabled by default** in this copy
+  (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`, decision of 2026-11-10; it is 1 in C-UASP), as
+  required by the C-UASP safety rules. Enable them only deliberately, for the motors-on
+  bench test (V8);
 - known open point, inherited from C-UASP: the calibration YAMLs are computed at
   2040x1536, while `settings.py` acquires 2592x1944 and `camera.py` rescales the
   intrinsics (fx ≈ 21060 → ≈ 26760 px). The comment in the YAML itself says the real

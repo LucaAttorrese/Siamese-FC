@@ -16,6 +16,13 @@ Pipeline (see suncubes/camera.py for the vision side):
 All computer-vision acquisition/KLT/ArUco/PnP/target-fusion logic lives in
 suncubes.camera; do not duplicate it here (see the repository TODO history for
 why this split exists).
+
+cuasp_siamfc: with settings.CV_TARGET_TRACKER = "siamfc" (the default here) the
+camera source is suncubes.siamfc_source.IdsSiamFCCorrectionSourceAdapter
+(provider_mode "ids_siamfc": SiamFC tracking of the drone + drone detector,
+fixed range Z) instead of the ArUco adapters. It produces the same
+CameraCorrection, so everything in this module downstream of CameraAPI (PBVS
+sign map, gain, clamp, dispatcher, stop on loss) is unchanged.
 """
 
 from __future__ import annotations
@@ -115,6 +122,52 @@ IDS_GENTL_CTI_PATH = str(getattr(settings, "CV_IDS_GENTL_CTI_PATH", ""))
 CONFIDENCE_MIN = float(getattr(settings, "CV_ARUCO_CONFIDENCE_MIN", 0.005))
 Z_MIN_M = float(getattr(settings, "CV_ARUCO_Z_MIN_M", 0.25))
 MAX_AGE_S = float(getattr(settings, "CV_CUAS_MAX_AGE_S", 0.25))
+
+# cuasp_siamfc: target tracker. "siamfc" -> camera provider_mode "ids_siamfc"
+# (SiamFC + drone detector, suncubes/siamfc_source.py); "aruco" -> the original
+# ArUco/PnP pipeline above, unchanged. In siamfc mode the gating confidence is
+# SIAMFC_CONF_MIN (CONFIDENCE_MIN is calibrated on the ArUco marker area).
+TARGET_TRACKER = str(getattr(settings, "CV_TARGET_TRACKER", "siamfc")).strip().lower()
+SIAMFC_CONF_MIN = float(getattr(settings, "CV_SIAMFC_CONF_MIN", 0.15))
+
+# settings name -> key of the siamfc / detector dicts read by
+# siamfc_source.SiamFCSourceConfig.from_dicts(). Weight paths are resolved
+# separately (relative to cuasp_siamfc/).
+_SIAMFC_SETTING_KEYS = {
+    "weights_sha256": "CV_SIAMFC_WEIGHTS_SHA256",
+    "device": "CV_SIAMFC_DEVICE",
+    "params": "CV_SIAMFC_PARAMS",
+    "target_range_m": "CV_SIAMFC_TARGET_RANGE_M",
+    "bbox_offset_px": "CV_SIAMFC_BBOX_OFFSET_PX",
+    "lost_conf": "CV_SIAMFC_LOST_CONF",
+    "lost_frames": "CV_SIAMFC_LOST_FRAMES",
+    "max_lost_s": "CV_SIAMFC_MAX_LOST_S",
+    "ref_frames": "CV_SIAMFC_REF_FRAMES",
+    "missing_hz": "CV_SIAMFC_MISSING_HZ",
+    "acquire_min_score": "CV_SIAMFC_ACQUIRE_MIN_SCORE",
+    "redetect_hz": "CV_SIAMFC_REDETECT_HZ",
+    "verify_radius": "CV_SIAMFC_VERIFY_RADIUS",
+    "verify_radius_min_px": "CV_SIAMFC_VERIFY_RADIUS_MIN_PX",
+    "verify_max_size_ratio": "CV_SIAMFC_VERIFY_MAX_SIZE_RATIO",
+    "reinit_iou": "CV_SIAMFC_REINIT_IOU",
+    "reinit_confirm": "CV_SIAMFC_REINIT_CONFIRM",
+    "verify_miss_limit": "CV_SIAMFC_VERIFY_MISS_LIMIT",
+}
+_DETECTOR_SETTING_KEYS = {
+    "weights_sha256": "CV_DETECTOR_WEIGHTS_SHA256",
+    "device": "CV_DETECTOR_DEVICE",
+    "conf_min": "CV_DETECTOR_CONF_MIN",
+    "imgsz": "CV_DETECTOR_IMGSZ",
+    "nms_iou": "CV_DETECTOR_NMS_IOU",
+    "max_det": "CV_DETECTOR_MAX_DET",
+    "fp16": "CV_DETECTOR_FP16",
+    "max_box_frac": "CV_DETECTOR_MAX_BOX_FRAC",
+    "min_box_px": "CV_DETECTOR_MIN_BOX_PX",
+    "confirm_frames": "CV_DETECTOR_CONFIRM_FRAMES",
+    "confirm_max_shift": "CV_DETECTOR_CONFIRM_MAX_SHIFT",
+    "confirm_max_size_ratio": "CV_DETECTOR_CONFIRM_MAX_SIZE_RATIO",
+    "confirm_max_gap_s": "CV_DETECTOR_CONFIRM_MAX_GAP_S",
+}
 
 # PBVS geometry-to-axis mapping. Python applies an explicit visual gain
 # (PBVS_GAIN, control/README.md's "Preferred baseline command formulation":
@@ -325,6 +378,25 @@ def _draw_debug_frame(
             cv2_mod.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2_mod.LINE_AA,
         )
 
+    # cuasp_siamfc: last detector boxes (thin, yellow) and the SiamFC box, coloured by
+    # tracker state (green tracking / orange lost / red searching).
+    for det in snapshot.get("detections") or []:
+        box = det.get("bbox_xywh")
+        if box is None:
+            continue
+        x0, y0, bw, bh = (float(v) for v in box)
+        cv2_mod.rectangle(vis, (int(x0), int(y0)), (int(x0 + bw), int(y0 + bh)), (0, 255, 255), 1, cv2_mod.LINE_AA)
+        cv2_mod.putText(vis, f"det {float(det.get('score', 0.0)):.2f}", (int(x0), max(12, int(y0) - 4)),
+                        cv2_mod.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2_mod.LINE_AA)
+    siamfc_box = snapshot.get("siamfc_bbox_xywh")
+    if siamfc_box is not None:
+        state = str(snapshot.get("tracker_state", ""))
+        color = {"tracking": (0, 255, 0), "lost": (0, 165, 255)}.get(state, (0, 0, 255))
+        x0, y0, bw, bh = (float(v) for v in siamfc_box)
+        cv2_mod.rectangle(vis, (int(x0), int(y0)), (int(x0 + bw), int(y0 + bh)), color, 2, cv2_mod.LINE_AA)
+        cv2_mod.putText(vis, f"SiamFC {state} conf={_format_finite(snapshot.get('siamfc_score'), precision=2)}",
+                        (int(x0), int(y0 + bh) + 18), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2_mod.LINE_AA)
+
     # Pointing references, drawn under the PBVS target marker: the frame's own
     # geometric center, the calibration's optical axis (principal point -- these
     # two are NOT the same point and can sit far apart), and where the loaded
@@ -356,7 +428,7 @@ def _draw_debug_frame(
             cv2_mod.circle(vis, (draw_lx, draw_ly), 10, (0, 0, 255), 2, cv2_mod.LINE_AA)
             _draw_cross(cv2_mod, vis, draw_lx, draw_ly, 16, (0, 0, 255), 1)
             label = "laser (calib) {}@{} m{}".format(
-                "" if snapshot.get("laser_axis_range_source") == "target" else "nominal ",
+                {"target": "", "fixed": "fixed "}.get(str(snapshot.get("laser_axis_range_source")), "nominal "),
                 _format_finite(snapshot.get("laser_axis_range_m"), precision=2),
                 "" if inside else " OUT",
             )
@@ -402,6 +474,16 @@ def _draw_debug_frame(
                 target_point["contributing_markers"], target_point["mode"],
             ),
             (10, y), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.58, (255, 0, 0), 2, cv2_mod.LINE_AA,
+        )
+    elif snapshot.get("tracking_backend") == "siamfc":
+        state = str(snapshot.get("tracker_state", ""))
+        cv2_mod.putText(
+            vis,
+            f"SiamFC state={state} conf={_format_finite(snapshot.get('siamfc_score'), precision=3)} "
+            f"Z fixed={_format_finite(snapshot.get('laser_axis_range_m'), ' m', 2)} "
+            f"detections={len(snapshot.get('detections') or [])}",
+            (10, y), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.58,
+            (0, 255, 0) if state == "tracking" else (0, 0, 255), 2, cv2_mod.LINE_AA,
         )
     else:
         cv2_mod.putText(vis, "PBVS target camera [m]: N/A", (10, y),
@@ -581,7 +663,7 @@ class MotorCommandDispatcher:
         # fresh encoder read. Validated live on real hardware 2026-09-18 (see
         # calibration/roughtest/README.md).
         if self._last_submit_valid and not valid:
-            print(f"[MOTOR] marker lost (reason={correction.reason}) -> stop[0]=1")
+            print(f"[MOTOR] target lost (reason={correction.reason}) -> stop[0]=1")
             asyncio.create_task(
                 _call_method_maybe_async(self.motors.stop, run_sync_in_thread=True)
             )
@@ -794,20 +876,68 @@ class MotorCommandDispatcher:
         self.status.connected = False
 
 
+def _resolve_repo_path(raw: Any) -> str:
+    """Path relative to cuasp_siamfc/ (REPO_ROOT_DIR), or absolute; '' stays ''."""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    path = Path(text)
+    return str(path if path.is_absolute() else (REPO_ROOT_DIR / path).resolve())
+
+
+def _siamfc_source_dicts() -> tuple[dict[str, Any], dict[str, Any]]:
+    """The ``siamfc`` and ``detector`` dicts of the camera configuration, from settings.
+
+    Read at call time (not at import) so tests can monkeypatch ``settings``. Empty
+    strings for SHA256 / device mean "not set".
+    """
+
+    def collect(mapping: dict[str, str]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, name in mapping.items():
+            if not hasattr(settings, name):
+                continue  # keep the dataclass default
+            value = getattr(settings, name)
+            if key in ("weights_sha256", "device"):
+                value = str(value or "").strip() or None
+            elif key == "fp16":
+                value = bool(int(value))
+            elif key == "bbox_offset_px":
+                value = tuple(float(v) for v in value)
+            out[key] = value
+        return out
+
+    siamfc = {"weights_path": _resolve_repo_path(getattr(settings, "CV_SIAMFC_WEIGHTS_PATH", "")), **collect(_SIAMFC_SETTING_KEYS)}
+    detector = {"weights_path": _resolve_repo_path(getattr(settings, "CV_DETECTOR_WEIGHTS_PATH", "")), **collect(_DETECTOR_SETTING_KEYS)}
+    return siamfc, detector
+
+
 def _validate_configuration() -> None:
     errors = []
     try:
         settings.validate()
     except ValueError as exc:
         errors.append(str(exc))
-    if not ARUCO_IDS:
-        errors.append("ARUCO_IDS must be non-empty")
-    if len(set(ARUCO_IDS)) != len(ARUCO_IDS):
-        errors.append("ARUCO_IDS must not contain duplicates")
-    if ARUCO_MARKER_SIZE_M <= 0.0:
-        errors.append("ARUCO_MARKER_SIZE_M must be > 0")
-    if not np.isfinite(CONFIDENCE_MIN) or CONFIDENCE_MIN < 0.0:
-        errors.append("CONFIDENCE_MIN must be finite and >= 0")
+    if TARGET_TRACKER not in ("aruco", "siamfc"):
+        errors.append(f"TARGET_TRACKER must be 'aruco' or 'siamfc', got {TARGET_TRACKER!r}")
+    if TARGET_TRACKER == "aruco":
+        if not ARUCO_IDS:
+            errors.append("ARUCO_IDS must be non-empty")
+        if len(set(ARUCO_IDS)) != len(ARUCO_IDS):
+            errors.append("ARUCO_IDS must not contain duplicates")
+        if ARUCO_MARKER_SIZE_M <= 0.0:
+            errors.append("ARUCO_MARKER_SIZE_M must be > 0")
+        if not np.isfinite(CONFIDENCE_MIN) or CONFIDENCE_MIN < 0.0:
+            errors.append("CONFIDENCE_MIN must be finite and >= 0")
+    elif TARGET_TRACKER == "siamfc":
+        if not np.isfinite(SIAMFC_CONF_MIN) or not 0.0 < SIAMFC_CONF_MIN < 1.0:
+            errors.append("SIAMFC_CONF_MIN must be in (0, 1)")
+        try:
+            from suncubes.siamfc_source import SiamFCSourceConfig  # noqa: PLC0415 (no torch import)
+
+            SiamFCSourceConfig.from_dicts(*_siamfc_source_dicts()).validate()
+        except (ValueError, TypeError) as exc:
+            errors.append(f"siamfc configuration: {exc}")
     if not np.isfinite(Z_MIN_M) or Z_MIN_M <= 0.0:
         errors.append("Z_MIN_M must be finite and > 0")
     if not np.isfinite(MAX_AGE_S) or MAX_AGE_S <= 0.0:
@@ -859,28 +989,32 @@ def _build_camera_config() -> CameraConfig:
     if IDS_GENTL_CTI_PATH:
         ids_cfg["gentl_cti_path"] = IDS_GENTL_CTI_PATH
 
-    aruco_cfg = {
-        "dict_name": ARUCO_DICT_NAME,
-        "marker_size_m": ARUCO_MARKER_SIZE_M,
-        "target_marker_ids": list(ARUCO_IDS),
+    source_cfg: dict[str, Any] = {
+        "ids_peak": ids_cfg,
+        "calibration": {"path": str(CALIBRATION_YAML)},
+        "debug_view": bool(SHOW_DEBUG_WINDOW),
     }
+    siamfc_mode = TARGET_TRACKER == "siamfc"
+    if siamfc_mode:
+        source_cfg["siamfc"], source_cfg["detector"] = _siamfc_source_dicts()
+    else:
+        source_cfg["aruco"] = {
+            "dict_name": ARUCO_DICT_NAME,
+            "marker_size_m": ARUCO_MARKER_SIZE_M,
+            "target_marker_ids": list(ARUCO_IDS),
+        }
 
     return CameraConfig(
         enable=True,
-        mode="ids_opencv",
+        mode="ids_siamfc" if siamfc_mode else "ids_opencv",
         gating=GatingConfig(
             max_age_s=MAX_AGE_S,
-            conf_min=CONFIDENCE_MIN,
+            conf_min=SIAMFC_CONF_MIN if siamfc_mode else CONFIDENCE_MIN,
             z_min_m=Z_MIN_M,
             max_abs_angle_rad=0.0,
         ),
         runtime=RuntimeConfig(background_worker=True, worker_hz=max(CUAS_LOOP_HZ, 1.0)),
-        ids_opencv={
-            "ids_peak": ids_cfg,
-            "aruco": aruco_cfg,
-            "calibration": {"path": str(CALIBRATION_YAML)},
-            "debug_view": bool(SHOW_DEBUG_WINDOW),
-        },
+        ids_opencv=source_cfg,  # the IDS source dict, shared by ids_opencv and ids_siamfc
     )
 
 
@@ -893,11 +1027,22 @@ async def main() -> None:
     _validate_configuration()
 
     print(f"=== CV CUAS supervisor [{CV_CUAS_CODE_VERSION}] ===")
-    print(f"markers: ids={ARUCO_IDS} dict={ARUCO_DICT_NAME} size_m={ARUCO_MARKER_SIZE_M}")
+    siamfc_mode = TARGET_TRACKER == "siamfc"
+    if siamfc_mode:
+        siamfc_cfg, detector_cfg = _siamfc_source_dicts()
+        print(
+            f"target tracker: SIAMFC (provider_mode=ids_siamfc) fixed_range_z={float(siamfc_cfg['target_range_m']):.2f}m "
+            f"(no range sensor: parallax error grows as |1/Z_true - 1/Z|)"
+        )
+        print(f"siamfc weights:   {siamfc_cfg['weights_path']} (expected sha256={siamfc_cfg.get('weights_sha256') or 'not checked'})")
+        print(f"detector weights: {detector_cfg['weights_path']} (expected sha256={detector_cfg.get('weights_sha256') or 'not checked'})")
+    else:
+        print(f"target tracker: ARUCO markers ids={ARUCO_IDS} dict={ARUCO_DICT_NAME} size_m={ARUCO_MARKER_SIZE_M}")
     print(f"calibration: {CALIBRATION_YAML}")
     print(
         "gating: "
-        f"max_age_s={MAX_AGE_S:.3f} confidence_min={CONFIDENCE_MIN:.4f} z_min_m={Z_MIN_M:.3f}"
+        f"max_age_s={MAX_AGE_S:.3f} "
+        f"confidence_min={SIAMFC_CONF_MIN if siamfc_mode else CONFIDENCE_MIN:.4f} z_min_m={Z_MIN_M:.3f}"
     )
     print(
         "pbvs: geometry_on_camera_py sign_map_and_clamp_on_cuasp "
@@ -932,6 +1077,10 @@ async def main() -> None:
     try:
         await asyncio.to_thread(camera_api.start)
         camera_started = True
+        # Weights actually loaded (path + SHA256 computed at load time), siamfc mode only.
+        loaded = getattr(getattr(camera_api._app, "_source", None), "weights_info", None)
+        for name, info in (loaded or {}).items():
+            print(f"loaded {name} weights: {info.get('path')} sha256={info.get('sha256')} {info.get('device', '')}".rstrip())
 
         if SHOW_DEBUG_WINDOW:
             cv2_mod.namedWindow(DEBUG_WINDOW_NAME, cv2_mod.WINDOW_NORMAL)
