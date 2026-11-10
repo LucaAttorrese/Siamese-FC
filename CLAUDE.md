@@ -36,11 +36,13 @@ PLAN.md                         piano e stato delle fasi (leggere per primo)
 cuasp_siamfc/
   README.md                     setup del PC di training, comandi, validazione, licenze
   PROVENANCE.md                 file copiati da C-UASP + SHA256
-  control/cuasp.py              supervisore C-UASP (copia; ancora pipeline ArUco)
-  control/suncubes/             camera.py, motors.py, settings.py (copie C-UASP)
-  control/suncubes/siamfc/      port SiamFC: convert_matconvnet, net, tracker, imresize
-  tools/                        eval_sequence, bench_siamfc, prepare_yolo_dataset, train_detector
-  tests/                        test C-UASP copiati + test SiamFC
+  control/cuasp.py              supervisore C-UASP (copia); SiamFC di default (CV_TARGET_TRACKER)
+  control/suncubes/             camera.py, motors.py, settings.py (copie C-UASP, modificate per SiamFC)
+  control/suncubes/siamfc_source.py  sorgente camera ids_siamfc: macchina a stati, geometria Z fissa, adapter
+  control/suncubes/siamfc/      port SiamFC (convert_matconvnet, net, tracker, imresize) + detector.py (YOLO)
+  tools/                        eval_sequence, bench_siamfc, prepare_yolo_dataset, train_detector,
+                                eval_detector, replay_siamfc_source
+  tests/                        test C-UASP copiati + test SiamFC, detector, adapter, e2e con cuasp.main()
   .venv/                        ambiente Python (gitignored)
 pretrained/                     pesi CFNet .mat e .pth convertiti (gitignored)
 datasets/                       dataset + MANIFEST.md (link, hash, ricostruzione; dati gitignored)
@@ -82,13 +84,49 @@ Riferimenti di regressione:
 - **Focale ambigua** (punto aperto ereditato da C-UASP): calibrazione a 2040x1536 contro acquisizione a 2592x1944, con fx ≈ 21 060 oppure ≈ 26 760 px. Va chiarito prima della validazione angolare.
 - **Esposizione di 20 ms contro target di 70 Hz**: la camera probabilmente non supera circa 50 fps. Verificare sul banco.
 
-## Stato al 2026-11-06 e prossimi passi
+## ▶ PUNTO DI RIPRESA (aggiornato al 2026-11-10)
 
-Fatto: copia della baseline C-UASP; port SiamFC validato offline (con copia dei crop in uint8: 6.9–8.9 ms per frame sulla 4060 e 5.9–8.1 ms sulla 5060 Laptop, fino a target di 400 px); dataset del detector pronti sul portatile; script di training pronto.
+**Da dove ripartire: decisione dell'utente sulla corsa stop/`abs` nel dispatcher dei motori (Fase 4, ultimo punto aperto).**
 
-Sul PC di training, in ordine (dettagli in `PLAN.md`, sezione "Ordine di esecuzione"):
-1. ✅ Setup secondo il README (venv cu130 con Python 3.13, pesi, test, benchmark) e latenza V5 registrata nel README (2026-11-06).
-2. ✅ Dataset: ricostruiti con `datasets/MANIFEST.md` il 2026-11-06 (hash e conteggi verificati; zip conservati).
-3. 🟡 Training di YOLO11s ✅: run `yolo11s_uav_gray_1280_e40` completato il 2026-11-09 (40 epoche, circa 10 minuti l'una). Pesi in `runs/detector/yolo11s_uav_gray_1280_e40/weights/best.pt` (epoca 36, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`); log cumulativo in `runs/yolo11s_uav_gray_1280_e40.log`. Test complessivo: mAP50 0,949, mAP50-95 0,593, P 0,962, R 0,869. La suddivisione per sorgente e per dimensione (`tools/eval_detector.py`, risultati in PLAN Fase 2 punto 2) mostra il punto debole su Anti-UAV300 sotto i 64 px. La diagnosi lo attribuisce a scene notturne con luci urbane, dove il drone viene rilevato ma con confidenza bassa (mediana 0,11): vedi PLAN.
-4. Fase 3 ✅ (`detector.py`, adapter `ids_siamfc`, routing). Fase 4 🟡: `settings.py` e `cuasp.py` fatti (SiamFC di default, motori disabilitati di default); aperta la corsa stop/`abs` nel dispatcher (vedi PLAN, Fase 4).
-5. V3 → V4b (ricerca iperparametri) → V4 → taratura delle soglie → V7/V8 al banco.
+Il problema (dettagli in `PLAN.md`, Fase 4, "Aperto"):
+- In `cuasp.py`, `MotorCommandDispatcher.submit()` lancia lo stop su perdita come task separato (`asyncio.create_task(self.motors.stop)`).
+- Se in quel momento il worker `_run()` sta già eseguendo `_send()` (encoder letti, `abs_rotate` in arrivo), i due invii si contendono il lock TCP di `motors.py`. Sul cavo può passare `stop[0]=1` e **poi** l'`abs[0,1]` già in volo, calcolato dall'ultimo campione valido: lo stop viene annullato.
+- Il codice è C-UASP ereditato e comune a ArUco e SiamFC. È stato trovato da `tests/test_cuasp_siamfc_e2e.py`, che **oggi fallisce circa 2 volte su 10** con "commands sent after the target was lost".
+
+Opzioni proposte all'utente, **in attesa di risposta**:
+- **A (consigliata):** inviare lo stop dallo stesso worker del dispatcher, invece che da un task separato, così l'ordine sul cavo è sempre "eventuale `abs` già in volo → stop". Modifica piccola, solo in `MotorCommandDispatcher` della copia `cuasp_siamfc` (C-UASP intatto). Rafforza la sicurezza. Il test e2e resta severo e deve passare 10 volte su 10 (provare con un ciclo di 10 esecuzioni).
+- **B:** lasciare il dispatcher invariato, registrare la corsa come rischio noto e rendere il test tollerante a un `abs` subito dopo lo stop; decisione definitiva prima di V8.
+
+Il PLAN dice "nessuna modifica al dispatcher": non toccarlo prima che l'utente scelga.
+
+**Stato git:** Fasi 3 e 4 committate dall'utente (`8124c36` "Integration cuasp-siam", `1327b5a` "Integration cuasp 2"). L'aggiornamento di questo file è successivo.
+
+**Dopo la decisione, in ordine** (dettagli in `PLAN.md`, "Ordine di esecuzione"):
+1. Chiudere la Fase 4: applicare A o B, rilanciare il test e2e 10 volte e la suite completa, aggiornare PLAN (Fase 4 ✅) e README.
+2. Registrare frame IDS nell'ambiente reale (al coperto, Mavic Mini a 20–22 m), anche a scena vuota, e analizzarli con `tools/replay_siamfc_source.py` (`--calibration`, `--empty-scene`): divario di dominio, falsi positivi persistenti, taratura di `CV_SIAMFC_ACQUIRE_MIN_SCORE` e delle soglie (V4).
+3. V5 con detector e SiamFC insieme sulla GPU: oggi `read_candidate` ha p99 di 15,6–17,5 ms, oltre i 14,3 ms del budget a 70 Hz ma entro i 20 ms a 50 fps.
+4. V3 (OTB) → V4b (ricerca iperparametri, circa 28 ore su questo PC) → V4 → taratura delle soglie.
+5. Prima di V7: risolvere la focale ambigua. `cuasp.py` usa ancora l'override temporaneo `calibration/calibration_legacy_20260921_x_test.yaml`.
+6. V7 (banco, motori spenti) → V8 (banco, motori accesi: **ricordare all'utente che i motori sono disabilitati di default** e vanno abilitati esplicitamente).
+
+## Storico dello stato
+
+Sul PC di training (dettagli in `PLAN.md`):
+1. ✅ Setup: venv cu130 con Python 3.13, pesi, test, benchmark; latenza V5 di SiamFC nel README (2026-11-06).
+2. ✅ Dataset ricostruiti con `datasets/MANIFEST.md` (2026-11-06; hash e conteggi verificati, zip conservati).
+3. ✅ Training di YOLO11s, run `yolo11s_uav_gray_1280_e40` (2026-11-06 → 09, 40 epoche, circa 10 minuti l'una):
+   - pesi in `runs/detector/yolo11s_uav_gray_1280_e40/weights/best.pt` (epoca 36, SHA256 `3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5`); log in `runs/yolo11s_uav_gray_1280_e40.log`;
+   - test complessivo: mAP50 0,949, mAP50-95 0,593, P 0,962, R 0,869;
+   - punto debole su Anti-UAV300 sotto i 64 px, dovuto a scene notturne con luci urbane (confidenza mediana 0,11). Non prioritario, perché l'ambiente operativo è al coperto (PLAN, Fase 2, punto 2).
+4. ✅ Fase 3 (2026-11-10):
+   - `siamfc/detector.py`: 29 ms per frame da 2592x1944, filtri sulla dimensione dei box, conferma temporale;
+   - `siamfc_source.py`: sorgente `ids_siamfc` con macchina a stati, verifica sul frame intero, perdita non recuperabile dal tracker se causata dal detector o dal bersaglio uscito dal frame;
+   - routing in `camera.py` e `tools/replay_siamfc_source.py`.
+
+   Riproduzione su DUT tracking: drone giusto nel 73–94 % dei frame con drone presente. Limite noto: un falso positivo persistente del detector è indistinguibile da un drone in volo stazionario.
+5. 🟡 Fase 4 (2026-11-10):
+   - `settings.py`: `CV_TARGET_TRACKER = "siamfc"`, parametri `CV_SIAMFC_*`/`CV_DETECTOR_*`, motori a 0;
+   - `cuasp.py`: configurazione, validazione, banner, debug;
+   - test (suite: 245 superati + 1 fallimento noto, più l'e2e instabile per la corsa nel dispatcher).
+
+   Manca solo la decisione sul dispatcher (vedi sopra).
