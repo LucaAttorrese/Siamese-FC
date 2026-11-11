@@ -136,7 +136,7 @@ Thread: SiamFC nel `camera-api-worker`, YOLO solo nel thread `drone-detector`; i
 
 Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siamfc"`, con import lazy. È l'unica modifica a `camera.py`.
 
-## Fase 4 — Integrazione in `cuasp.py` e `settings.py` 🟡 (2026-11-10)
+## Fase 4 — Integrazione in `cuasp.py` e `settings.py` ✅ (2026-11-10 / 11)
 
 **Fatto.**
 - **`settings.py`**:
@@ -155,7 +155,21 @@ Routing: in `camera.py::_build_source` aggiungere il ramo `cfg.mode == "ids_siam
 - Test: routing e configurazione SiamFC, controllo che ogni parametro `CV_SIAMFC_*`/`CV_DETECTOR_*` arrivi alla sorgente, validazione, frame di debug, nuovi controlli di `settings.validate()`. Test end-to-end `tests/test_cuasp_siamfc_e2e.py`: sorgente SiamFC con componenti simulati → `CameraAPI` → `cuasp.main()` → dispatcher → `FakePCMMServer`, con comandi `abs[0,1]` di segno e valore attesi e stop su perdita.
 - Avvio reale della sorgente dai settings con i pesi veri: percorsi risolti e SHA256 corrispondenti.
 
-**Aperto: corsa nel dispatcher ereditato da C-UASP** (trovata dal test end-to-end, 2 esecuzioni su 10). Quando la perdita arriva mentre un `abs_rotate` è già in corso, lo stop parte da un task separato (`asyncio.create_task(self.motors.stop)` in `MotorCommandDispatcher.submit`). Se vince la corsa sul lock TCP, sul cavo passa `stop[0]=1` seguito dall'`abs[0,1]` già in volo, calcolato dall'ultimo campione valido: lo stop viene annullato. Vale anche in modalità ArUco. Decisione dell'utente in sospeso.
+**Risolto (2026-11-11): corsa nel dispatcher ereditato da C-UASP.**
+- **Problema** (trovato dal test end-to-end, 2 esecuzioni su 10): quando la perdita arrivava mentre un `abs_rotate` era già in corso, lo stop partiva da un task separato (`asyncio.create_task(self.motors.stop)` in `MotorCommandDispatcher.submit`). Se vinceva la corsa sul lock TCP, sul cavo passava `stop[0]=1` seguito dall'`abs[0,1]` già in volo, calcolato dall'ultimo campione valido, e lo stop veniva annullato. Valeva anche in modalità ArUco.
+- **Decisione dell'utente**: opzione A, cioè modificare il dispatcher della copia `cuasp_siamfc` e documentare la differenza dal funzionamento originale.
+- **Modifica**:
+  - `submit()` segna solo `_stop_pending`;
+  - il worker `_run()` invia lo stop (`_send_stop_on_loss()`) all'inizio del giro successivo, prima di ogni altro invio, quindi sempre dopo un comando già in volo;
+  - `_send()` scarta il comando se la perdita arriva durante la lettura degli encoder;
+  - uno stop fallito viene registrato come un invio fallito.
+- **Verifica**:
+  - ordine riprodotto in modo deterministico: originale `enc, abs_begin, stop, abs_end`, ora `enc, abs_begin, abs_end, stop`;
+  - nuovo `tests/test_motor_dispatcher_stop_order.py` (6 test);
+  - i test originali del dispatcher passano invariati;
+  - test end-to-end 30 esecuzioni su 30;
+  - suite completa 251 passati + 1 fallimento noto.
+- **Documentazione**: `cuasp_siamfc/PROVENANCE.md` ("Local changes to the copied files", tra i cambiamenti di comportamento rispetto a C-UASP) e README ("Behaviour changes with respect to C-UASP"). In C-UASP la corsa resta, perché quel repository non si modifica.
 
 Specifica originale:
 
@@ -186,9 +200,9 @@ Specifica originale:
 | V4 dominio drone | DUT tracking, Anti-UAV300 test e sequenze IDS registrate (registratore Mono8 con `ts_capture_ns`) | Success/precision, errore del centro in px **e in mrad** (÷fx), tempo di riaggancio, falsi riagganci | ⏳ |
 | V4b ricerca iperparametri | Random search, procedura del paper App. F (sezione sotto) | I parametri tarati devono battere quelli della Tab. 2 sul test held-out, altrimenti restano quelli del paper | ⏳ Da fare sul PC di training |
 | V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame (14.3 ms a 70 Hz, 20 ms a 50 fps) con il detector attivo | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5060 Laptop (PC di training): 5.9–8.1 ms medi, p99 ≤ 9.2 ms. Manca la misura con il detector attivo sulla stessa GPU |
-| V6 pytest | Suite in `cuasp_siamfc/tests` | Tutto verde; senza torch i test SiamFC vengono saltati, non falliscono | 🟡 Verde, a parte il test ArUco già rotto in C-UASP |
+| V6 pytest | Suite in `cuasp_siamfc/tests` | Tutto verde; senza torch i test SiamFC vengono saltati, non falliscono | 🟡 Verde, a parte il test ArUco già rotto in C-UASP (2026-11-11: 251 passati + 1; e2e `cuasp.main()` → server motori simulato stabile, 30/30) |
 | V7 banco, motori spenti | IDS dal vivo con `CV_CUAS_ENABLE_MOTOR_COMMANDS=0`. Drone **con ArUco montati**: la pipeline ArUco registrata fa da riferimento offline per SiamFC sugli stessi frame | Differenza angolare entro un budget da concordare; segni az/po corretti | ⏳ |
-| V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1`. **Promemoria (richiesto dall'utente il 2026-11-10): i comandi motore sono disabilitati di default (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`); vanno abilitati esplicitamente solo per questa prova, ricordandolo all'utente prima di iniziare.** Prima di V8 va risolta la corsa stop/`abs` del dispatcher (Fase 4) | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
+| V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1`. **Promemoria (richiesto dall'utente il 2026-11-10): i comandi motore sono disabilitati di default (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`); vanno abilitati esplicitamente solo per questa prova, ricordandolo all'utente prima di iniziare.** La corsa stop/`abs` del dispatcher è risolta (Fase 4, 2026-11-11): in V8 verificare sul banco che dopo lo stop su perdita non arrivino altri comandi | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
 
 ### V4b — Ricerca degli iperparametri del tracker
 
@@ -265,7 +279,8 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
 2. ✅ Ricostruzione dei dataset (`datasets/MANIFEST.md`) il 2026-11-06: hash e conteggi uguali al MANIFEST.
-3. 🟡 Training del detector YOLO11s ✅ (completato il 2026-11-09, test complessivo mAP50 0,949 / mAP50-95 0,593). Valutazione per sorgente e per dimensione ✅ (vedi Fase 2, punto 2).
-4. `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E.
+3. ✅ Training del detector YOLO11s (completato il 2026-11-09, test complessivo mAP50 0,949 / mAP50-95 0,593). Valutazione per sorgente e per dimensione ✅ (vedi Fase 2, punto 2).
+4. ✅ `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E (2026-11-10 / 11; corsa stop/`abs` del dispatcher risolta).
+4b. ⏳ Registrazione di frame IDS nell'ambiente reale, al coperto, anche a scena vuota, e analisi con `tools/replay_siamfc_source.py` (V4, falsi positivi, taratura delle soglie); V5 con detector e SiamFC insieme.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

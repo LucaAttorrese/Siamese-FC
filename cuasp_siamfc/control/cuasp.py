@@ -611,7 +611,20 @@ async def _call_method_maybe_async(
 
 
 class MotorCommandDispatcher:
-    """Latest-only PBVS error dispatcher; timing and velocity are computed in PCMM."""
+    """Latest-only PBVS error dispatcher; timing and velocity are computed in PCMM.
+
+    cuasp_siamfc local change (2026-11-11, see PROVENANCE.md "Local changes"): the
+    stop on a tracked -> lost transition is executed by the worker task _run(), in
+    sequence with the absolute commands, instead of by a separate asyncio task
+    created in submit(). In C-UASP the separate task raced with a send already in
+    progress (encoders read, abs_rotate about to go out): both competed for the
+    motors.py socket lock, and the wire could carry `stop[0]=1` followed by the
+    in-flight `abs[0,1]=...`, which cancelled the stop. Now the stop always goes
+    out after any in-flight command, and a command whose encoder read was still
+    in progress when the loss arrived is dropped instead of sent. Cost: the stop
+    can wait for the end of one in-flight send (one encoder round trip + one
+    write, a few ms).
+    """
 
     def __init__(self, motors: PCMMMotorAdapterTCP):
         self.motors = motors
@@ -626,6 +639,10 @@ class MotorCommandDispatcher:
         # lost transition, not merely because the very first-ever submission
         # happens to be unreliable (nothing was ever actuated to stop yet).
         self._last_submit_valid = False
+        # Stop requested by submit() on a tracked -> lost transition, executed by
+        # _run() (cuasp_siamfc local change, see the class docstring). Only touched
+        # from the event loop thread (submit() and the worker task).
+        self._stop_pending = False
 
     async def start(self) -> None:
         if self._task is not None:
@@ -664,11 +681,29 @@ class MotorCommandDispatcher:
         # calibration/roughtest/README.md).
         if self._last_submit_valid and not valid:
             print(f"[MOTOR] target lost (reason={correction.reason}) -> stop[0]=1")
-            asyncio.create_task(
-                _call_method_maybe_async(self.motors.stop, run_sync_in_thread=True)
-            )
+            # cuasp_siamfc local change (2026-11-11): was
+            #     asyncio.create_task(_call_method_maybe_async(self.motors.stop, ...))
+            # which raced with an in-flight abs_rotate (see the class docstring).
+            # The request queued above wakes the worker, which sends the stop
+            # before anything else.
+            self._stop_pending = True
         self._last_submit_valid = valid
         return valid
+
+    async def _send_stop_on_loss(self) -> None:
+        """Executed by _run() only: the stop requested by submit() on a loss."""
+        self._stop_pending = False
+        try:
+            await _call_method_maybe_async(self.motors.stop, run_sync_in_thread=True)
+            self.status.last_reason = "stopped_on_loss"
+        except Exception as exc:
+            # Same handling as a failed _send(): the connection is considered broken.
+            self.status.connected = False
+            self.status.error_count += 1
+            self.status.last_reason = "stop_failed"
+            self.status.last_error = f"{type(exc).__name__}: {exc}"
+            self._next_reconnect_s = time.monotonic() + max(0.05, float(MOTOR_RECONNECT_INITIAL_S))
+            print(f"[MOTOR] stop on loss failed: {self.status.last_error}")
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -763,6 +798,12 @@ class MotorCommandDispatcher:
                 self.motors.get_encoder_positions,
                 run_sync_in_thread=True,
             )
+            if self._stop_pending:
+                # cuasp_siamfc local change (2026-11-11): the target was lost while
+                # the encoders were being read. This command is superseded; _run()
+                # sends the stop next instead of this abs_rotate.
+                self.status.last_reason = "cancelled_by_loss"
+                return False
             target_az = float(current_az) + float(correction.d_az_motor_units)
             target_po = float(current_po) + float(correction.d_po_motor_units)
             await _call_method_maybe_async(
@@ -824,6 +865,13 @@ class MotorCommandDispatcher:
                     self.status.dropped_count = self.status.replaced_count + self.status.stale_count
                 except asyncio.QueueEmpty:
                     pass
+
+            # cuasp_siamfc local change (2026-11-11): the stop on loss is sent here,
+            # sequentially, so it can never be overtaken by an abs_rotate already in
+            # progress (see the class docstring). It runs before the shutdown check so
+            # a loss coinciding with shutdown is still stopped explicitly.
+            if self._stop_pending:
+                await self._send_stop_on_loss()
 
             if self._stop_event.is_set():
                 break

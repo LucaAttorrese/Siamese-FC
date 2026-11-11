@@ -84,30 +84,27 @@ Riferimenti di regressione:
 - **Focale ambigua** (punto aperto ereditato da C-UASP): calibrazione a 2040x1536 contro acquisizione a 2592x1944, con fx ≈ 21 060 oppure ≈ 26 760 px. Va chiarito prima della validazione angolare.
 - **Esposizione di 20 ms contro target di 70 Hz**: la camera probabilmente non supera circa 50 fps. Verificare sul banco.
 
-## ▶ PUNTO DI RIPRESA (aggiornato al 2026-11-10)
+## ▶ PUNTO DI RIPRESA (aggiornato al 2026-11-11)
 
-**Da dove ripartire: decisione dell'utente sulla corsa stop/`abs` nel dispatcher dei motori (Fase 4, ultimo punto aperto).**
+**Fasi 0–4 completate.** Il codice è pronto per girare dal vivo con la camera IDS: `cuasp.py` in modalità SiamFC, motori disabilitati di default.
 
-Il problema (dettagli in `PLAN.md`, Fase 4, "Aperto"):
-- In `cuasp.py`, `MotorCommandDispatcher.submit()` lancia lo stop su perdita come task separato (`asyncio.create_task(self.motors.stop)`).
-- Se in quel momento il worker `_run()` sta già eseguendo `_send()` (encoder letti, `abs_rotate` in arrivo), i due invii si contendono il lock TCP di `motors.py`. Sul cavo può passare `stop[0]=1` e **poi** l'`abs[0,1]` già in volo, calcolato dall'ultimo campione valido: lo stop viene annullato.
-- Il codice è C-UASP ereditato e comune a ArUco e SiamFC. È stato trovato da `tests/test_cuasp_siamfc_e2e.py`, che **oggi fallisce circa 2 volte su 10** con "commands sent after the target was lost".
+**Da dove ripartire: registrare frame IDS nell'ambiente reale e analizzarli (V4).** Servono registrazioni al coperto con il Mavic Mini a 20–22 m, più riprese **a scena vuota**. La parte di registrazione dipende dall'utente (rig, camera, ambiente): chiedergli se le registrazioni esistono già e in che formato (cartella di immagini o video, timestamp). Poi:
+1. analizzare con `tools/replay_siamfc_source.py`: `--calibration` con la calibrazione vera, `--empty-scene` per le riprese senza drone, `--gt` se esistono etichette;
+2. misurare il divario di dominio (dataset all'aperto contro uso al coperto) e i falsi positivi persistenti della scena, il limite noto della Fase 3;
+3. tarare `CV_SIAMFC_ACQUIRE_MIN_SCORE`, le soglie di perdita e la confidenza; se servono, aggiungere i frame etichettati al dataset del detector (PLAN Fase 2, punto 4).
 
-Opzioni proposte all'utente, **in attesa di risposta**:
-- **A (consigliata):** inviare lo stop dallo stesso worker del dispatcher, invece che da un task separato, così l'ordine sul cavo è sempre "eventuale `abs` già in volo → stop". Modifica piccola, solo in `MotorCommandDispatcher` della copia `cuasp_siamfc` (C-UASP intatto). Rafforza la sicurezza. Il test e2e resta severo e deve passare 10 volte su 10 (provare con un ciclo di 10 esecuzioni).
-- **B:** lasciare il dispatcher invariato, registrare la corsa come rischio noto e rendere il test tollerante a un `abs` subito dopo lo stop; decisione definitiva prima di V8.
+**Stato git:** Fasi 3 e 4 committate dall'utente (`8124c36` "Integration cuasp-siam", `1327b5a` "Integration cuasp 2"). **Non ancora committati** (2026-11-11), da far committare all'utente:
+- correzione della corsa stop/`abs` nel dispatcher (`control/cuasp.py`);
+- nuovo `tests/test_motor_dispatcher_stop_order.py`;
+- `PROVENANCE.md` (sezione "Local changes to the copied files"), README, PLAN e questo file.
 
-Il PLAN dice "nessuna modifica al dispatcher": non toccarlo prima che l'utente scelga.
+**Ultima modifica fatta (2026-11-11), opzione A scelta dall'utente:** in `MotorCommandDispatcher` lo stop su perdita viene inviato dal worker `_run()` invece che da un task separato, quindi arriva sempre dopo un `abs_rotate` già in volo. Un comando la cui lettura encoder era in corso al momento della perdita viene scartato. È documentato come cambiamento di comportamento rispetto a C-UASP in `cuasp_siamfc/PROVENANCE.md` e nel README ("Behaviour changes with respect to C-UASP"). In C-UASP la corsa resta, perché quel repository non si modifica. Test end-to-end 30/30, suite 251 passati + 1 fallimento noto.
 
-**Stato git:** Fasi 3 e 4 committate dall'utente (`8124c36` "Integration cuasp-siam", `1327b5a` "Integration cuasp 2"). L'aggiornamento di questo file è successivo.
-
-**Dopo la decisione, in ordine** (dettagli in `PLAN.md`, "Ordine di esecuzione"):
-1. Chiudere la Fase 4: applicare A o B, rilanciare il test e2e 10 volte e la suite completa, aggiornare PLAN (Fase 4 ✅) e README.
-2. Registrare frame IDS nell'ambiente reale (al coperto, Mavic Mini a 20–22 m), anche a scena vuota, e analizzarli con `tools/replay_siamfc_source.py` (`--calibration`, `--empty-scene`): divario di dominio, falsi positivi persistenti, taratura di `CV_SIAMFC_ACQUIRE_MIN_SCORE` e delle soglie (V4).
-3. V5 con detector e SiamFC insieme sulla GPU: oggi `read_candidate` ha p99 di 15,6–17,5 ms, oltre i 14,3 ms del budget a 70 Hz ma entro i 20 ms a 50 fps.
-4. V3 (OTB) → V4b (ricerca iperparametri, circa 28 ore su questo PC) → V4 → taratura delle soglie.
-5. Prima di V7: risolvere la focale ambigua. `cuasp.py` usa ancora l'override temporaneo `calibration/calibration_legacy_20260921_x_test.yaml`.
-6. V7 (banco, motori spenti) → V8 (banco, motori accesi: **ricordare all'utente che i motori sono disabilitati di default** e vanno abilitati esplicitamente).
+**Poi, in ordine** (dettagli in `PLAN.md`, "Ordine di esecuzione"):
+1. V5 con detector e SiamFC insieme sulla GPU: oggi `read_candidate` ha p99 di 15,6–17,5 ms, oltre i 14,3 ms del budget a 70 Hz ma entro i 20 ms a 50 fps.
+2. V3 (OTB) → V4b (ricerca iperparametri, circa 28 ore su questo PC) → V4 → taratura delle soglie.
+3. Prima di V7: risolvere la focale ambigua. `cuasp.py` usa ancora l'override temporaneo `calibration/calibration_legacy_20260921_x_test.yaml`.
+4. V7 (banco, motori spenti) → V8 (banco, motori accesi: **ricordare all'utente che i motori sono disabilitati di default** e vanno abilitati esplicitamente; verificare sul banco che dopo lo stop su perdita non arrivino altri comandi).
 
 ## Storico dello stato
 
@@ -124,9 +121,7 @@ Sul PC di training (dettagli in `PLAN.md`):
    - routing in `camera.py` e `tools/replay_siamfc_source.py`.
 
    Riproduzione su DUT tracking: drone giusto nel 73–94 % dei frame con drone presente. Limite noto: un falso positivo persistente del detector è indistinguibile da un drone in volo stazionario.
-5. 🟡 Fase 4 (2026-11-10):
+5. ✅ Fase 4 (2026-11-10 / 11):
    - `settings.py`: `CV_TARGET_TRACKER = "siamfc"`, parametri `CV_SIAMFC_*`/`CV_DETECTOR_*`, motori a 0;
-   - `cuasp.py`: configurazione, validazione, banner, debug;
-   - test (suite: 245 superati + 1 fallimento noto, più l'e2e instabile per la corsa nel dispatcher).
-
-   Manca solo la decisione sul dispatcher (vedi sopra).
+   - `cuasp.py`: configurazione, validazione, banner, debug; stop su perdita sequenziato dal worker del dispatcher (corsa ereditata da C-UASP corretta, documentata in `PROVENANCE.md`);
+   - test: suite 251 passati + 1 fallimento noto; e2e `cuasp.main()` → server motori simulato 30/30.

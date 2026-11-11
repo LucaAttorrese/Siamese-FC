@@ -38,6 +38,73 @@ a7076a3358e193d5c0c40cb4f4a5117c59d3b77bd92496bf7ee8e58846242376 *./tests/test_m
 acb58b2a96b54e75c8ceb94c5869e5785db22b8a9a9a59f84b9a9a8fabd89739 *./tests/test_visual_sample_gating.py
 ```
 
+## Local changes to the copied files
+
+Checked on 2026-11-11 against the SHA256 above: six copied files differ from C-UASP; all the
+others (including `control/suncubes/motors.py`, the calibration files and
+`tests/test_motor_dispatcher.py`) are unchanged. Every change below is marked in the code
+with "cuasp_siamfc".
+
+### Behaviour changes with respect to C-UASP
+
+These alter how the copied runtime behaves, not only what it is configured to do.
+
+1. **Stop on target loss is sequenced by the motor dispatcher worker**
+   (`control/cuasp.py`, `MotorCommandDispatcher`, 2026-11-11).
+   - C-UASP: on a tracked -> lost transition, `submit()` started the stop as a separate
+     task, `asyncio.create_task(_call_method_maybe_async(self.motors.stop, ...))`. If the
+     worker `_run()` was in the middle of `_send()` (encoders read, `abs_rotate` about to be
+     written), the two competed for the `motors.py` socket lock, and the wire could carry
+     `stop[0]=1` followed by the in-flight `abs[0,1]=...`, computed from the last reliable
+     sample. That cancelled the stop: after the loss the axes moved again towards the last
+     target instead of stopping. Found by `tests/test_cuasp_siamfc_e2e.py` (about 2 runs in
+     10); reproduced deterministically: call order `enc, abs_begin, stop, abs_end`.
+   - Here: `submit()` only sets `_stop_pending`; the worker sends the stop
+     (`_send_stop_on_loss()`) at the top of its next iteration, before anything else, so it
+     always follows any command already in flight (`enc, abs_begin, abs_end, stop`). In
+     addition, `_send()` drops its command if the loss arrives while the encoders are being
+     read, so in that case only the stop goes out. A failing stop is logged and marks the
+     connection as broken, like a failing send (in C-UASP the exception was left unhandled
+     in the detached task).
+   - Unchanged: the stop still fires exactly once per tracked -> lost transition; latest-only
+     queue, stale-command drop, rate limiting, `abs_rotate` against a fresh encoder read, the
+     safe stop on shutdown. Cost: the stop can wait for the end of one in-flight send (one
+     encoder round trip + one write, a few ms).
+   - Tests: `tests/test_motor_dispatcher_stop_order.py` (new, deterministic race cases);
+     the original `tests/test_motor_dispatcher.py` passes unchanged; the end-to-end test
+     passed 30 runs out of 30 after the change.
+   - The same race exists in C-UASP (ArUco mode too). C-UASP is not modified (project rule);
+     porting the fix there is a decision for its maintainers.
+
+2. **Motor commands disabled by default** (`control/suncubes/settings.py`, 2026-11-10):
+   `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` (C-UASP: 1), so a first SiamFC run cannot move the
+   motors by mistake. Enable deliberately for the motors-on bench test only.
+
+### Integration changes (SiamFC tracker, PLAN.md Phases 3-4)
+
+- `control/cuasp.py`: `CV_TARGET_TRACKER` selection (`TARGET_TRACKER`, default `"siamfc"`);
+  `_siamfc_source_dicts()` / `_resolve_repo_path()`; `_validate_configuration()` skips the
+  ArUco checks and validates the SiamFC source configuration in siamfc mode;
+  `_build_camera_config()` builds `provider_mode = "ids_siamfc"` with `CV_SIAMFC_CONF_MIN`
+  as gating confidence; start-up banner (tracker, fixed range, weight paths and SHA256);
+  debug window (SiamFC box, detections, status line, "fixed" laser range label); message
+  `[MOTOR] marker lost` -> `[MOTOR] target lost`. PBVS signs, gain and clamp are unchanged.
+- `control/suncubes/camera.py`: `_build_source()` routes `provider_mode == "ids_siamfc"` to
+  `suncubes.siamfc_source.IdsSiamFCCorrectionSourceAdapter` (lazy import); comment on the
+  modes in `CameraConfig`. Nothing else changes in this file.
+- `control/suncubes/settings.py`: `CV_TARGET_TRACKER`, `CV_SIAMFC_*`, `CV_DETECTOR_*`
+  settings and their checks in `validate()` (plus behaviour change 2 above).
+- `pyproject.toml`: `siamfc` extra (torch, torchvision, scipy, ultralytics) and comments.
+- `tests/test_camera_config_routing.py`: the original ArUco tests run with
+  `TARGET_TRACKER = "aruco"` and assert the same things; SiamFC tests added.
+- `tests/test_settings_validate.py`: tests for the new settings appended; the original
+  tests are unchanged.
+
+New files (not copies): `control/suncubes/siamfc_source.py`, `control/suncubes/siamfc/`,
+`tools/`, the other `tests/test_siamfc_*`, `tests/test_eval_detector.py`,
+`tests/test_replay_tool.py`, `tests/test_train_detector_stop.py`,
+`tests/test_cuasp_siamfc_e2e.py`, `tests/test_motor_dispatcher_stop_order.py`.
+
 ## Baseline test status at copy time
 
 `python -m pytest` in this folder: **92 passed, 1 failed**. The failure,
