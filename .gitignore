@@ -23,3 +23,6 @@ datasets/*
 
 # Training outputs (detector runs, checkpoints)
 runs/
+
+# IDS camera recordings for validation (cuasp_siamfc/tools/record_ids.py, RECORDING_PROTOCOL.md)
+recordings/

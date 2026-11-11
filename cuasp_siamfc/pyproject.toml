@@ -19,6 +19,9 @@ dependencies = [
 # which is installed from the camera manufacturer's own installer, not PyPI.
 # Tests never import it directly -- see tests/README or the "out of scope"
 # section of the tests gap plan.
+# cuasp_siamfc (2026-11-11): the bindings ARE on PyPI; on the training PC
+# (IDS peak SDK 26.06.1): pip install ids_peak==1.17.0 ids_peak_ipl==1.18.0
+# (see the "ids" extra below). The SDK runtime itself still comes from the IDS installer.
 
 [project.optional-dependencies]
 test = [
@@ -46,6 +49,12 @@ siamfc = [
     "torchvision",
     "scipy",
     "ultralytics",
+]
+# Live IDS camera (cuasp.py, tools/record_ids.py). Versions validated against the IDS
+# peak SDK 26.06.1 installed on the training PC (2026-11-11).
+ids = [
+    "ids_peak==1.17.0",
+    "ids_peak_ipl==1.18.0",
 ]
 
 [tool.setuptools]

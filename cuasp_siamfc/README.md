@@ -57,7 +57,7 @@ stated otherwise. On Linux, use `.venv/bin/python` instead of `.\.venv\Scripts\p
 | Git | To get the code. |
 | Disk | About **35 GB** free: venv ~5 GB, datasets ~10 GB extracted plus ~10 GB of zips while downloading (deleted afterwards), YOLO dataset 3.6 GB, training runs a few GB. |
 | Internet | To download packages, weights, datasets, and the YOLO starting weights (`yolo11s.pt`; Ultralytics also downloads `yolo26n.pt` for its AMP check). |
-| Live camera only | IDS peak SDK with its Python bindings (`ids_peak`, `ids_peak_ipl`), from the IDS installer (not on PyPI). Not needed for training or offline tests. |
+| Live camera only | IDS peak SDK (runtime and GenTL producers, from the IDS installer; training PC: 26.06.1) plus its Python bindings from PyPI: `pip install ids_peak==1.17.0 ids_peak_ipl==1.18.0` (installed on the training PC on 2026-11-11, `abi3` wheels for Python ≥ 3.11). Not needed for training or offline tests. |
 
 ### 2. Get the code
 
@@ -240,9 +240,17 @@ not match `CV_SIAMFC_WEIGHTS_SHA256` / `CV_DETECTOR_WEIGHTS_SHA256` stops the st
 another machine). The fixed range for the parallax correction is
 `CV_SIAMFC_TARGET_RANGE_M` (21 m). Before any live run:
 
-- install the IDS peak SDK and its Python bindings into the venv, following the IDS
-  instructions. Set `CV_IDS_GENTL_CTI_PATH` in `control\suncubes\settings.py` if the
-  SDK needs an explicit GenTL producer path;
+- install the IDS peak SDK (IDS installer) and its Python bindings into the venv:
+  `.\.venv\Scripts\python -m pip install ids_peak==1.17.0 ids_peak_ipl==1.18.0`. Check with
+  the camera connected that `ids_peak.DeviceManager` lists it (the GenTL producers GEVK,
+  U3VK and uEye are found automatically on the training PC). Set `CV_IDS_GENTL_CTI_PATH`
+  in `control\suncubes\settings.py` only if the SDK needs an explicit GenTL producer path;
+- note on `camera.py` (inherited from C-UASP): `_buffer_to_mono8_numpy()` calls
+  `ConvertTo("Mono8")` with a string, which `ids_peak_ipl` 1.18 rejects (it expects a
+  `PixelFormatName`); the error is swallowed and the image is used as delivered. This is
+  correct as long as the camera really delivers Mono8 (`PixelFormat` is set at start-up).
+  On the first run with the camera, check that the preview of `tools/record_ids.py` looks
+  right;
 - check the network settings of the motor controller: `IP` / `PORT` in
   `control\suncubes\settings.py` (currently `192.168.0.109:8123`);
 - motor commands are **disabled by default** in this copy
@@ -360,6 +368,8 @@ tools/train_detector.py       new: detector training (Ultralytics YOLO), with cl
 tools/eval_detector.py        new: detector test breakdown by source and drone size
 tools/replay_siamfc_source.py new: replays a recorded sequence (images or video, optional GT) through
                               the full ids_siamfc source in real time: safety metrics, per-frame CSV
+tools/record_ids.py           new: records every IDS frame with its timestamp, using the runtime camera
+                              settings (procedure: ../RECORDING_PROTOCOL.md); --fake for dry runs
 control/suncubes/siamfc_source.py  new: ids_siamfc camera correction source (SiamFC + detector)
 control/cuasp.py, suncubes/   copies of C-UASP (integration changes go here)
 calibration/                  copies of the C-UASP calibration YAMLs (read-only)

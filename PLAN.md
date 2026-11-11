@@ -281,6 +281,6 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 2. ✅ Ricostruzione dei dataset (`datasets/MANIFEST.md`) il 2026-11-06: hash e conteggi uguali al MANIFEST.
 3. ✅ Training del detector YOLO11s (completato il 2026-11-09, test complessivo mAP50 0,949 / mAP50-95 0,593). Valutazione per sorgente e per dimensione ✅ (vedi Fase 2, punto 2).
 4. ✅ `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E (2026-11-10 / 11; corsa stop/`abs` del dispatcher risolta).
-4b. ⏳ Registrazione di frame IDS nell'ambiente reale, al coperto, anche a scena vuota, e analisi con `tools/replay_siamfc_source.py` (V4, falsi positivi, taratura delle soglie); V5 con detector e SiamFC insieme.
+4b. ⏳ Registrazione di frame IDS nell'ambiente reale, al coperto, anche a scena vuota, e analisi con `tools/replay_siamfc_source.py` (V4, falsi positivi, taratura delle soglie); V5 con detector e SiamFC insieme. Pronti (2026-11-11): il protocollo `RECORDING_PROTOCOL.md` (blocchi A scena vuota, B drone a 20–22 m, C con marker ArUco, D camera in movimento; circa 35–40 min di riprese, 100–180 GB) e il registratore `cuasp_siamfc/tools/record_ids.py` (ogni frame con timestamp, impostazioni del runtime; provato in modalità sintetica a 5 MP: 0 perdite a 50 e a 70 fps). In attesa della sessione di registrazione dell'utente.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

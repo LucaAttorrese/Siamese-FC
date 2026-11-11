@@ -33,6 +33,7 @@ più un detector **YOLO** per l'inizializzazione e il riaggancio. A valle non ca
 
 ```
 PLAN.md                         piano e stato delle fasi (leggere per primo)
+RECORDING_PROTOCOL.md           protocollo delle riprese IDS per V4 (per chi registra)
 cuasp_siamfc/
   README.md                     setup del PC di training, comandi, validazione, licenze
   PROVENANCE.md                 file copiati da C-UASP + SHA256
@@ -41,7 +42,7 @@ cuasp_siamfc/
   control/suncubes/siamfc_source.py  sorgente camera ids_siamfc: macchina a stati, geometria Z fissa, adapter
   control/suncubes/siamfc/      port SiamFC (convert_matconvnet, net, tracker, imresize) + detector.py (YOLO)
   tools/                        eval_sequence, bench_siamfc, prepare_yolo_dataset, train_detector,
-                                eval_detector, replay_siamfc_source
+                                eval_detector, replay_siamfc_source, record_ids
   tests/                        test C-UASP copiati + test SiamFC, detector, adapter, e2e con cuasp.main()
   .venv/                        ambiente Python (gitignored)
 pretrained/                     pesi CFNet .mat e .pth convertiti (gitignored)
@@ -83,20 +84,27 @@ Riferimenti di regressione:
 - **Fedeltà al riferimento MATLAB** (vedi README, "Known reference quirks"): crop centrati 1 px prima, `imresize` bicubica di MATLAB, ricerca del picco column-major. Sono riprodotti apposta: non "correggerli" senza misurarne l'effetto.
 - **Focale ambigua** (punto aperto ereditato da C-UASP): calibrazione a 2040x1536 contro acquisizione a 2592x1944, con fx ≈ 21 060 oppure ≈ 26 760 px. Va chiarito prima della validazione angolare.
 - **Esposizione di 20 ms contro target di 70 Hz**: la camera probabilmente non supera circa 50 fps. Verificare sul banco.
+- **Binding IDS** (2026-11-11): l'SDK IDS peak 26.06.1 non include wheel Python; i binding vengono da PyPI (`ids_peak==1.17.0`, `ids_peak_ipl==1.18.0`, extra `ids` in `pyproject.toml`), già installati nella venv. In `camera.py` (C-UASP) `_buffer_to_mono8_numpy()` chiama `ConvertTo("Mono8")` con una stringa, che `ids_peak_ipl` 1.18 rifiuta; l'errore viene ignorato e l'immagine usata così com'è. Va bene finché la camera consegna davvero Mono8: alla prima prova con la camera controllare l'anteprima di `record_ids.py`.
+- **Memoria virtuale esaurita da Esplora risorse** (2026-11-11): `explorer.exe`, aperto dal 7 novembre, aveva 101 GB di memoria privata. La memoria virtuale del sistema era esaurita (0,3 GB liberi su 127) e ogni nuovo processo Python falliva all'avvio con `OpenBLAS error: Memory allocation still failed`. Non è un errore del codice. Rimedio: Gestione attività → Esplora risorse → Riavvia (lo fa l'utente; non terminare processi di sistema). Probabile causa: miniature di cartelle con moltissime immagini (dataset, registrazioni).
 
 ## ▶ PUNTO DI RIPRESA (aggiornato al 2026-11-11)
 
 **Fasi 0–4 completate.** Il codice è pronto per girare dal vivo con la camera IDS: `cuasp.py` in modalità SiamFC, motori disabilitati di default.
 
-**Da dove ripartire: registrare frame IDS nell'ambiente reale e analizzarli (V4).** Servono registrazioni al coperto con il Mavic Mini a 20–22 m, più riprese **a scena vuota**. La parte di registrazione dipende dall'utente (rig, camera, ambiente): chiedergli se le registrazioni esistono già e in che formato (cartella di immagini o video, timestamp). Poi:
-1. analizzare con `tools/replay_siamfc_source.py`: `--calibration` con la calibrazione vera, `--empty-scene` per le riprese senza drone, `--gt` se esistono etichette;
+**Da dove ripartire: registrare frame IDS nell'ambiente reale e analizzarli (V4).** Le registrazioni **non esistono ancora** su questo PC (2026-11-11). Sono pronti:
+- **`RECORDING_PROTOCOL.md`** (radice della repo, in italiano, per chi fa le riprese): blocco A scena vuota (priorità massima), B drone a 20–22 m, C con marker ArUco, D camera in movimento; circa 35–40 minuti di riprese, 100–180 GB;
+- **`cuasp_siamfc/tools/record_ids.py`**: registra ogni frame con timestamp usando le impostazioni IDS del runtime; perdite di cattura e di scrittura contate in `meta.json`; anteprima con `q` per fermare; `--fake` per le prove senza camera. Provato in modalità sintetica a 5 MP: 0 perdite a 50 e a 70 fps (circa 2,6 MB per frame). Test in `tests/test_record_ids.py`.
+
+**Binding IDS installati** nella venv (2026-11-11): la libreria si inizializza e trova i producer GenTL (GEVK, U3VK, uEye); nessuna camera collegata a questo PC al momento. La prima prova con la camera è `record_ids.py --name prova_camera --duration 10` (checklist del protocollo).
+
+**Verificato dopo il riavvio di Esplora risorse (2026-11-11):** anteprima del registratore (201 frame in 4 s, 0 perdite, finestra chiusa da sola allo scadere della durata) e suite completa (259 passati + 1 fallimento noto).
+
+Quando l'utente ha le registrazioni (cartelle `recordings/<data_ora>_<nome>/`, gitignored):
+1. analizzare con `tools/replay_siamfc_source.py` su `recordings/.../frames`: `--calibration` con la calibrazione vera, `--empty-scene` per il blocco A, `--gt` se esistono etichette (da pre-generare con detector e tracker e far correggere all'utente);
 2. misurare il divario di dominio (dataset all'aperto contro uso al coperto) e i falsi positivi persistenti della scena, il limite noto della Fase 3;
 3. tarare `CV_SIAMFC_ACQUIRE_MIN_SCORE`, le soglie di perdita e la confidenza; se servono, aggiungere i frame etichettati al dataset del detector (PLAN Fase 2, punto 4).
 
-**Stato git:** Fasi 3 e 4 committate dall'utente (`8124c36` "Integration cuasp-siam", `1327b5a` "Integration cuasp 2"). **Non ancora committati** (2026-11-11), da far committare all'utente:
-- correzione della corsa stop/`abs` nel dispatcher (`control/cuasp.py`);
-- nuovo `tests/test_motor_dispatcher_stop_order.py`;
-- `PROVENANCE.md` (sezione "Local changes to the copied files"), README, PLAN e questo file.
+**Stato git:** Fasi 3 e 4 e correzione del dispatcher committate dall'utente (`8124c36`, `1327b5a`, `a9d7319` "Fix: motor dispatcher"). **Non ancora committati** (2026-11-11), da far committare all'utente: `RECORDING_PROTOCOL.md`, `cuasp_siamfc/tools/record_ids.py`, `cuasp_siamfc/tests/test_record_ids.py`, `.gitignore` (`recordings/`), README, PLAN e questo file.
 
 **Ultima modifica fatta (2026-11-11), opzione A scelta dall'utente:** in `MotorCommandDispatcher` lo stop su perdita viene inviato dal worker `_run()` invece che da un task separato, quindi arriva sempre dopo un `abs_rotate` già in volo. Un comando la cui lettura encoder era in corso al momento della perdita viene scartato. È documentato come cambiamento di comportamento rispetto a C-UASP in `cuasp_siamfc/PROVENANCE.md` e nel README ("Behaviour changes with respect to C-UASP"). In C-UASP la corsa resta, perché quel repository non si modifica. Test end-to-end 30/30, suite 251 passati + 1 fallimento noto.
 
