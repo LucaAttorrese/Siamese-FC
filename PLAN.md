@@ -199,7 +199,7 @@ Specifica originale:
 | V3 benchmark | OTB-2013/OTB-100 (toolkit `got10k`), rete RGB su RGB e rete grigia su OTB convertito in grigio | Vedi P1 | ⏳ |
 | V4 dominio drone | DUT tracking, Anti-UAV300 test e sequenze IDS registrate (registratore Mono8 con `ts_capture_ns`) | Success/precision, errore del centro in px **e in mrad** (÷fx), tempo di riaggancio, falsi riagganci | ⏳ |
 | V4b ricerca iperparametri | Random search, procedura del paper App. F (sezione sotto) | I parametri tarati devono battere quelli della Tab. 2 sul test held-out, altrimenti restano quelli del paper | ⏳ Da fare sul PC di training |
-| V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame con il detector attivo: 16,0 ms a 62,6 fps (camera dal 2026-11-16) | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5060 Laptop (PC di training): 5.9–8.1 ms medi, p99 ≤ 9.2 ms. Manca la misura con il detector attivo sulla stessa GPU |
+| V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame con il detector attivo: 16,0 ms a 62,6 fps (camera dal 2026-11-16) | 🟡 **Al limite** (2026-11-16, 5060 Laptop, frame 2040x1536 a 62,6 fps):<br>• SiamFC da solo: 6,0–7,8 ms medi, p99 ≤ 8,6;<br>• sorgente completa con il detector: mediana 6,3 ms, p95 12,4, **p99 17,6**, max 33.<br>Il 2,3 % dei frame sfora i 16 ms, mai due di fila, a circa 5 Hz: è la contesa con la verifica del detector. Nessun effetto pratico: comandi motore a 50 Hz al massimo, campioni validi 250 ms. Rimedio noto, non applicato: chiamare YOLO senza `predict` di Ultralytics. Dettagli nel README |
 | V6 pytest | Suite in `cuasp_siamfc/tests` | Tutto verde; senza torch i test SiamFC vengono saltati, non falliscono | 🟡 Verde, a parte il test ArUco già rotto in C-UASP (2026-11-11: 251 passati + 1; e2e `cuasp.main()` → server motori simulato stabile, 30/30) |
 | V7 banco, motori spenti | IDS dal vivo con `CV_CUAS_ENABLE_MOTOR_COMMANDS=0`. Drone **con ArUco montati**: la pipeline ArUco registrata fa da riferimento offline per SiamFC sugli stessi frame | Differenza angolare entro un budget da concordare; segni az/po corretti | ⏳ |
 | V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1`. **Promemoria (richiesto dall'utente il 2026-11-10): i comandi motore sono disabilitati di default (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`); vanno abilitati esplicitamente solo per questa prova, ricordandolo all'utente prima di iniziare.** La corsa stop/`abs` del dispatcher è risolta (Fase 4, 2026-11-11): in V8 verificare sul banco che dopo lo stop su perdita non arrivino altri comandi | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
@@ -302,5 +302,59 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
    - calibrazione: resta l'override `_x_test`.
 
    La camera è pronta per la sessione di registrazione.
+
+   **Blocco A, scena vuota** (registrato e analizzato il 2026-11-16):
+   - 12 spezzoni da 60 s (10 zone di parete, porta e pavimento; A10 a luci spente), 45 084 frame;
+   - riprodotti in tempo reale a 62,6 fps con le impostazioni del runtime (`runs/v4_blockA/`);
+   - **nessun frame affidabile e nessun aggancio**: nessun falso allarme sarebbe arrivato ai motori;
+   - box grezzi del detector: **zero in 11 spezzoni su 12** (537 rilevazioni ciascuno, nessun box nemmeno sopra 0,15);
+   - in A10 a luci spente ci sono 100 box deboli su due piccole macchie chiare della parete, sempre negli stessi punti. Score mediano 0,18, massimo 0,33 contro gli 0,5 dell'aggancio; dimensione 38–57 × 19–27 px, molto sotto i 130–300 px attesi per il drone a 21 m. Con le luci accese la stessa zona (A8) dà zero box.
+   - Il limite noto della Fase 3 (falso positivo persistente agganciato) non si presenta in questo ambiente.
+   - Idea da valutare dopo il blocco B, non applicata: una dimensione minima dei box legata alla distanza di esercizio (oggi `CV_DETECTOR_MIN_BOX_PX` = 4) eliminerebbe anche questi box.
+
+   **Blocco B, primo controllo** (2026-11-16, `20261116_145326_B1_stazionario_a_terra`, drone **fermo a terra** a 21 m, sfondo pavimento e parete grigia):
+   - detector sul drone in 290 rilevazioni su 290, score 0,70–0,75;
+   - aggancio dopo 0,27 s, poi tracking al 100 %;
+   - centro del tracker a 7,5 px da quello del detector (mediana), 26 px al massimo, con una reinizializzazione dalla verifica;
+   - box 229 × 76 px (lato medio 132 px, come stimato).
+
+   Lo spezzone breve `20261116_145249_B1_...` (un oggetto lasciato nell'inquadratura) va escluso dalle analisi.
+
+   **Blocco B, B1 in volo stazionario** (2026-11-16, ore 16:29 e 16:31, `20261116_162916_B1_stazionario_in_volo` e `..._163148_..._r2`):
+   - registrati nel tardo pomeriggio, nuvoloso e quasi buio, con le luci interne accese: livello medio 30–35 (51 alle 14:53, 82 a mezzogiorno), p99 51–54. La luce delle finestre pesa molto, quindi di sera la scena è più scura;
+   - 62,61 fps, 0 perdite;
+   - entrambi agganciati dopo 0,26 s, poi tracking al 100 % per 60 s, confidenza del tracker ≥ 0,88;
+   - detector: score 0,70–0,76 sul drone in tutte le 290 rilevazioni, come alla luce del giorno. **Il buio di questa sera non pesa sul detector, guadagno non necessario.** Nessun box lontano dal drone; i pochi box in più (score 0,15–0,24) sono doppioni sovrapposti al drone;
+   - box del tracker 293 × 91 px (lato medio 162 px); deriva del drone in volo stazionario fino a 179 px (circa 16 cm);
+   - spezzone 1: centro del tracker a 3,8 px dal detector (mediana), 14 px al massimo;
+   - spezzone r2: il box del tracker **scivola lentamente verso la parte alta del drone** (da 6 a circa 30 px in 35 s; IoU con il detector fino a 0,50). La verifica lo reinizializza al frame 2357 (regola: IoU < `reinit_iou` 0,5 per 2 verifiche di fila), poi la distanza torna a 3 px. Il tracker è rimasto sempre sul drone; 30 px sono circa 1,2 mrad, cioè 2,6 cm a 21 m (controllato sulle immagini).
+   - Per la taratura V4, non applicato: il box del drone è largo e basso (circa 3:1), quindi l'IoU è molto sensibile agli spostamenti verticali. `reinit_iou` più alto (ad esempio 0,7) correggerebbe la deriva prima. Va misurato sugli spezzoni con il drone in movimento, dove anche il detector è meno preciso.
+   - Terzo spezzone stazionario (`..._163946_B1_stazionario_in_volo_r3`, sfondo con porta): tracking al 100 %, detector 0,58–0,78.
+
+   **Blocco B, B2 movimenti lenti** (2026-11-16, 16:43–16:50, 4 spezzoni `..._B2_lento_in_volo_r1..r4`; fuori quasi buio, luci accese, livello medio 25–35). Gli spezzoni registrati di sera sono la condizione peggiore, non quella d'uso.
+   - Sfondo chiaro o alternato (r1, r3): **tracking al 100 %** con il drone che attraversa quasi tutto il frame (x 240–1868, y 71–1398), velocità fino a circa 560 px/s (circa 0,5 m/s a 21 m).
+   - Sfondo scuro (r2: fascia grigia scura in basso; r4: porta scura): **tracking all'81 % (r2) e al 40 % (r4)**, con 2 e 6 perdite.
+   - Causa delle perdite, controllata sulle immagini: il drone è scuro, quindi davanti a uno sfondo scuro il contrasto cade. Il detector lo vede ancora, ma con score 0,2–0,45, a volte nessun box.
+     - Due verifiche di fila senza box portano alla perdita (comportamento voluto).
+     - Il riaggancio richiede 3 rilevazioni ≥ 0,5, quindi arriva solo dopo 3–11 s.
+   - Il tracker invece segue il drone: confidenza 0,5–0,9 al momento delle perdite.
+   - **Nessun falso bersaglio**: tutti i box del detector in queste fasi sono sul drone.
+   - Prova con il solo detector sui frame delle perdite, schiariti digitalmente (simulano il guadagno):
+
+     | Frame | Score ≥ 0,5 originale | ×2 (+6 dB) | ×3 (+9,5 dB) |
+     |---|---|---|---|
+     | r2, fascia scura | 13–17 % | 100 % | 100 % |
+     | r4, porta | 0–8 % | 66–76 % | 79–94 % |
+     | r3, controllo | 100 % | 100 % | 100 % |
+
+     - I box sono sul drone (8 px di distanza mediana dai box deboli originali).
+     - Sulla scena vuota del blocco A, schiarita: nessun box ≥ 0,5 tranne 1 su 60 frame in A10 a luci spente con ×2 (53 px, molto sotto la dimensione del drone); nessuno con ×3.
+     - **Il detector soffre le immagini scure, più che il contrasto in sé.**
+   - Rimedi possibili, nessuno applicato:
+     - guadagno della camera più alto quando la scena è scura;
+     - normalizzazione della luminosità prima del detector (cambiamento del codice);
+     - frame IDS etichettati nel training del detector (Fase 2, punto 4);
+     - in taratura, `acquire_min_score` più basso insieme a una dimensione minima dei box.
+   - B3–B7 rimandati alla mattina del 2026-11-17, con la luce del giorno (condizione d'uso). Consigliato anche un B2 diurno davanti alla porta e alla fascia scura, da confrontare con r2 e r4.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

@@ -15,6 +15,8 @@ Usage (from cuasp_siamfc/)::
     .venv/Scripts/python tools/replay_siamfc_source.py D:/ids_rec/empty_hall --empty-scene
     # override settings of the source
     .venv/Scripts/python tools/replay_siamfc_source.py <seq> --siamfc redetect_hz=2 verify_miss_limit=3 --detector conf_min=0.2
+    # latency V5: DUT frames resized to the IDS camera size, paced at the camera rate, preloaded
+    .venv/Scripts/python tools/replay_siamfc_source.py <dut video> --gt <gt> --resize 2040 1536 --fps 62.6 --preload --max-frames 1000
 
 Input: a folder of images (sorted by name; jpg/png/bmp/tif) or a video file. Frames are
 converted to Mono8. Ground truth (``--gt``): one line per frame, ``x y w h`` (spaces or
@@ -71,6 +73,21 @@ def read_gt(path: Path, n_frames: Optional[int] = None) -> np.ndarray:
         rows.append([np.nan] * 4 if (w <= 0 or h <= 0 or x < 0 or y < 0) else [x, y, w, h])
     gt = np.asarray(rows, float).reshape(-1, 4)
     return gt if n_frames is None else gt[:n_frames]
+
+
+def scale_gt(gt: np.ndarray, sx: float, sy: float) -> np.ndarray:
+    """Ground truth (edge coordinates) of frames resized by ``sx``, ``sy``: edges scale exactly."""
+    out = np.array(gt, float, copy=True)
+    out[:, [0, 2]] *= float(sx)
+    out[:, [1, 3]] *= float(sy)
+    return out
+
+
+def resize_frames(frames: Iterator[np.ndarray], size_wh: tuple[int, int]) -> Iterator[np.ndarray]:
+    import cv2  # noqa: PLC0415
+
+    for gray in frames:
+        yield gray if gray.shape[1::-1] == tuple(size_wh) else cv2.resize(gray, tuple(size_wh), interpolation=cv2.INTER_LINEAR)
 
 
 def gt_to_pixel_centre(box_edges: Sequence[float]) -> tuple[float, float, float, float]:
@@ -234,6 +251,22 @@ def summarize(records: list[dict[str, Any]], fps: float, has_gt: bool) -> dict[s
     return out
 
 
+SCORE_LEVELS = (0.15, 0.25, 0.5)  # detector score levels counted in the summary (0.5 = CV_SIAMFC_ACQUIRE_MIN_SCORE)
+
+
+def summarize_detections(dets: list[dict[str, Any]], n_frames: int, fps: float) -> dict[str, Any]:
+    """Raw detector boxes (one row per box of each consumed detector job): how many, how strong.
+    In an empty scene every box is a false positive."""
+    scores = np.array([d["score"] for d in dets], float)
+    out: dict[str, Any] = {"boxes": int(len(dets)), "jobs_with_boxes": int(len({d["job"] for d in dets})),
+                           "max_score": float(scores.max()) if len(scores) else None}
+    for level in SCORE_LEVELS:
+        sel = scores >= level
+        out[f"boxes_score_ge_{level:g}"] = int(sel.sum())
+        out[f"boxes_score_ge_{level:g}_per_min"] = float(sel.sum() / max(n_frames / fps / 60.0, 1e-9))
+    return out
+
+
 def _parse_overrides(items: Sequence[str]) -> dict[str, Any]:
     import yaml  # noqa: PLC0415
 
@@ -262,6 +295,11 @@ def main() -> int:
     ap.add_argument("--fps", type=float, default=50.0, help="replay rate (real time)")
     ap.add_argument("--fast", action="store_true", help="no real-time pacing")
     ap.add_argument("--max-frames", type=int)
+    ap.add_argument("--resize", type=int, nargs=2, metavar=("W", "H"),
+                    help="resize every frame (and the ground truth) to W x H, e.g. 2040 1536 = IDS camera (latency V5)")
+    ap.add_argument("--preload", action="store_true",
+                    help="decode (and resize) all frames into memory before the replay, so decoding does not compete "
+                         "with the measured pipeline (about 3.1 MB per 2040x1536 frame; cap with --max-frames)")
     ap.add_argument("--siamfc", nargs="*", default=[], metavar="KEY=VALUE", help="overrides of the siamfc settings")
     ap.add_argument("--detector", nargs="*", default=[], metavar="KEY=VALUE", help="overrides of the detector settings")
     ap.add_argument("--out", type=Path, help="per-frame CSV (a .json summary is written next to it)")
@@ -282,10 +320,23 @@ def main() -> int:
     else:
         n_avail = None
     first = next(iter_frames(args.source, 1))
-    h0, w0 = first.shape[:2]
+    h_src, w_src = first.shape[:2]
+    w0, h0 = (int(args.resize[0]), int(args.resize[1])) if args.resize else (w_src, h_src)
     n_frames = n_avail if args.max_frames is None else min(args.max_frames, n_avail or args.max_frames)
     gt = read_gt(args.gt, n_frames) if args.gt is not None else None
+    if gt is not None and (w0, h0) != (w_src, h_src):
+        gt = scale_gt(gt, w0 / w_src, h0 / h_src)
     has_gt = gt is not None or args.empty_scene
+
+    frames: Any = iter_frames(args.source, n_frames)
+    if (w0, h0) != (w_src, h_src):
+        frames = resize_frames(frames, (w0, h0))
+    if args.preload:
+        t0 = time.perf_counter()
+        frames = list(frames)
+        print(f"preloaded {len(frames)} frames {w0}x{h0} ({sum(f.nbytes for f in frames) / 1e9:.1f} GB) in {time.perf_counter() - t0:.1f} s")
+    else:
+        frames = _Prefetcher(frames)
 
     cfg: dict[str, Any] = {
         "siamfc": {"weights_path": str(args.siamfc_weights), "target_range_m": float(args.target_range), **_parse_overrides(args.siamfc)},
@@ -307,19 +358,31 @@ def main() -> int:
     print(f"start (load + warm-up): {time.perf_counter() - t0:.1f} s")
     for name, info in adapter.weights_info.items():
         print(f"  {name}: {info['path']} sha256={info['sha256']}")
-    print(f"replaying {args.source} ({n_frames if n_frames is not None else '?'} frames {w0}x{h0}) at {'max speed' if args.fast else f'{args.fps:g} fps'}")
+    resized = f" (resized from {w_src}x{h_src})" if (w0, h0) != (w_src, h_src) else ""
+    print(f"replaying {args.source} ({n_frames if n_frames is not None else '?'} frames {w0}x{h0}{resized}) at {'max speed' if args.fast else f'{args.fps:g} fps'}")
 
     records: list[dict[str, Any]] = []
+    detections: list[dict[str, Any]] = []
+    last_dets: Any = adapter.last_detections
+    job = 0
     period = 1.0 / float(args.fps)
     next_t = time.perf_counter()
     try:
-        for i, gray in enumerate(_Prefetcher(iter_frames(args.source, n_frames))):
+        for i, gray in enumerate(frames):
             producer.publish(gray)
             t_rc = time.perf_counter()
             cand = adapter.read_candidate(time.monotonic_ns())
             read_ms = (time.perf_counter() - t_rc) * 1e3
             obs = adapter.last_observation
             bbox = obs.bbox_xywh if obs is not None else None
+            dets = adapter.last_detections
+            if dets is not last_dets:  # a detector job with boxes was consumed in this frame
+                last_dets = dets
+                if dets:
+                    job += 1
+                    for d in dets:
+                        detections.append({"frame": i, "job": job, "x": float(d.bbox_xywh[0]), "y": float(d.bbox_xywh[1]),
+                                           "w": float(d.bbox_xywh[2]), "h": float(d.bbox_xywh[3]), "score": float(d.score)})
             gt_pc = None
             if gt is not None and i < len(gt) and not np.isnan(gt[i, 0]):
                 gt_pc = gt_to_pixel_centre(gt[i])
@@ -343,8 +406,10 @@ def main() -> int:
         adapter.stop()
 
     summary = summarize(records, float(args.fps), has_gt)
+    summary["detector_boxes"] = summarize_detections(detections, len(records), float(args.fps))
     summary["source_stats"] = {k: stats.get(k) for k in ("detections_submitted", "detections_ok", "detection_failures", "session")}
-    summary["settings"] = {"siamfc": cfg["siamfc"], "detector": cfg["detector"], "calibration": str(args.calibration) if args.calibration else "synthetic"}
+    summary["settings"] = {"siamfc": cfg["siamfc"], "detector": cfg["detector"], "calibration": str(args.calibration) if args.calibration else "synthetic",
+                           "frame_size": [w0, h0], "source_size": [w_src, h_src], "preload": bool(args.preload)}
 
     print(f"\nframes {summary['frames']}, first reliable frame {summary['first_reliable_frame']}, reliable frames {summary['reliable_frames']}")
     a = summary["after_first_track"]
@@ -362,6 +427,10 @@ def main() -> int:
         print(f"read_candidate: median {r['median']:.1f} ms, p99 {r['p99']:.1f}, max {r['max']:.1f}")
     print(f"reasons: {summary['reasons']}")
     print(f"session: {summary['source_stats'].get('session')}")
+    db = summary["detector_boxes"]
+    print(f"detector boxes: {db['boxes']} in {db['jobs_with_boxes']} jobs (of {summary['source_stats'].get('detections_submitted')} submitted), "
+          f"max score {db['max_score'] if db['max_score'] is None else round(db['max_score'], 3)}; "
+          + ", ".join(f"score >= {lv:g}: {db[f'boxes_score_ge_{lv:g}']}" for lv in SCORE_LEVELS))
 
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -375,7 +444,12 @@ def main() -> int:
                 w.writerow([rec["frame"], rec["state"], rec["reason"], int(rec["reliable"]), rec["confidence"], *b,
                             rec["d_az_rad"], rec["d_po_rad"], *g, rec["err_px"], rec["iou"], f"{rec['read_ms']:.3f}", rec["category"] or ""])
         args.out.with_suffix(".json").write_text(json.dumps(summary, indent=2, default=str))
-        print(f"written {args.out} and {args.out.with_suffix('.json')}")
+        det_path = args.out.with_name(args.out.stem + "_detections.csv")
+        with open(det_path, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["frame", "job", "x", "y", "w", "h", "score"])
+            w.writeheader()
+            w.writerows(detections)
+        print(f"written {args.out}, {args.out.with_suffix('.json')} and {det_path.name}")
     return 0
 
 

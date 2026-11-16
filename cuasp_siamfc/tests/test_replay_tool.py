@@ -76,3 +76,28 @@ def test_summarize_counts_and_dangerous_segments(rp):
 def test_summarize_without_ground_truth(rp):
     s = rp.summarize([_rec(0, "tracking", True)], fps=50.0, has_gt=False)
     assert s["reliable_frames"] == 1 and "coverage" not in s
+
+
+def test_scale_gt_scales_edge_coordinates_and_keeps_absent_rows(rp):
+    gt = np.array([[100.0, 50.0, 40.0, 20.0], [np.nan] * 4])
+    out = rp.scale_gt(gt, 2040 / 1920, 1536 / 1080)
+    np.testing.assert_allclose(out[0], [100 * 2040 / 1920, 50 * 1536 / 1080, 40 * 2040 / 1920, 20 * 1536 / 1080])
+    assert np.isnan(out[1]).all()
+    np.testing.assert_array_equal(gt[0], [100.0, 50.0, 40.0, 20.0])  # input untouched
+
+
+def test_resize_frames_produces_the_requested_size(rp):
+    frames = [np.zeros((1080, 1920), np.uint8), np.zeros((1536, 2040), np.uint8)]
+    out = list(rp.resize_frames(iter(frames), (2040, 1536)))
+    assert [f.shape for f in out] == [(1536, 2040), (1536, 2040)]
+    assert out[1] is frames[1]  # already the right size: not copied
+
+
+def test_summarize_detections_counts_boxes_per_score_level(rp):
+    dets = [{"job": 1, "score": 0.2}, {"job": 1, "score": 0.6}, {"job": 2, "score": 0.3}]
+    s = rp.summarize_detections(dets, n_frames=626, fps=62.6)  # 10 s
+    assert s["boxes"] == 3 and s["jobs_with_boxes"] == 2 and s["max_score"] == 0.6
+    assert (s["boxes_score_ge_0.15"], s["boxes_score_ge_0.25"], s["boxes_score_ge_0.5"]) == (3, 2, 1)
+    assert s["boxes_score_ge_0.5_per_min"] == pytest.approx(6.0)
+    empty = rp.summarize_detections([], n_frames=626, fps=62.6)
+    assert empty["boxes"] == 0 and empty["max_score"] is None

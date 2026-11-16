@@ -111,7 +111,29 @@ Riferimenti di regressione:
 
 Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel README. Test nuovi in `tests/test_ids_camera_settings.py` (17). Suite: 281 passati + 1 fallimento noto.
 
-La scena di prova (una parete) a 15 ms risulta "very dark" (media 45, p99 61). Nella sala vera vanno controllati i livelli di grigio stampati dal registratore; se servono, alzare `CV_IDS_GAIN_DB` di circa 2,5 dB, solo dopo averlo chiesto all'utente.
+**Prova in sala fatta dall'utente (2026-11-16, 15 ms, guadagno 0 dB)** su `recordings/20261116_115630_prova_sala` e `..._115714_prova_sala`:
+- luci spente: media 55, p1–p99 43–74;
+- luci accese: media 82, p1–p99 60–117;
+- in entrambe 62,6 fps, 0 perdite, nessun avviso. **Guadagno non necessario**; la condizione di esercizio è a luci accese.
+- L'inquadratura è la stessa parete delle prove del mattino: chiesto all'utente se è lo sfondo reale di volo.
+
+**Sessioni di registrazione avviate dall'utente il 2026-11-16.**
+- **Blocco A (scena vuota) fatto e analizzato**: 12 spezzoni, nessun aggancio né frame affidabile. Box grezzi del detector a zero in 11 spezzoni; in A10 a luci spente box deboli (score ≤ 0,33, contro 0,5 per agganciare) su due macchie chiare della parete. Dettagli in PLAN, punto 4b; risultati in `runs/v4_blockA/`.
+- Lo spezzone con oggetti in movimento non è stato fatto, perché l'utente dice che nel caso d'uso non ci saranno. È consigliato per sicurezza (una persona nell'inquadratura), facoltativo.
+- **Non analizzare mentre l'utente registra**: sullo stesso portatile si rischiano perdite di frame.
+- **Blocco B in corso.** Primo spezzone, B1 con il drone **fermo a terra**: detector 290/290 (score 0,70–0,75), aggancio in 0,27 s, tracking al 100 %. Dettagli in PLAN, punto 4b; risultati in `runs/v4_blockB/`.
+  - **Escludere `recordings/20261116_145249_B1_stazionario_a_terra`** (spezzone breve con un oggetto nell'inquadratura, indicazione dell'utente). Non cancellarlo.
+  - **B1 in volo stazionario fatto** (2 spezzoni, ore 16:29 e 16:31, tardo pomeriggio quasi buio con luci accese, livello medio 30–35): aggancio in 0,26 s, tracking al 100 %, detector 0,70–0,76 in tutte le rilevazioni. Il buio non pesa e il guadagno non serve.
+  - In r2 il box del tracker scivola verso l'alto del drone fino a circa 30 px, prima che la verifica lo corregga (`reinit_iou` 0,5). Da valutare in V4 un `reinit_iou` più alto; non applicato.
+  - **B2 fatto di sera** (fuori buio, condizione peggiore e non d'uso), 4 spezzoni:
+    - con sfondo chiaro tracking al 100 %;
+    - davanti alla fascia scura (r2) e alla porta scura (r4) 81 % e 40 %. Il detector dà score bassi sul drone scuro su sfondo scuro, le verifiche falliscono e il riaggancio tarda 3–11 s;
+    - nessun falso bersaglio;
+    - schiarendo i frame ×2 il detector torna sopra 0,5 nel 66–100 % dei casi. Dettagli e rimedi (non applicati) in PLAN, punto 4b.
+  - **B3–B7 rimandati alla mattina del 2026-11-17**, con la luce del giorno (decisione dell'utente). Il guadagno resta a 0 dB; non è stato cambiato nulla nelle impostazioni.
+    - Consigliato rifare anche un B2 in luce diurna davanti alla porta e alla fascia scura in basso, per vedere se le perdite di stasera dipendono dal buio.
+    - Il guadagno si cambia solo da `CV_IDS_GAIN_DB` in `settings.py`: `record_ids.py` non ha un'opzione per il guadagno.
+  - Analisi del blocco B: `tools/replay_siamfc_source.py <rec>/frames --calibration calibration\calibration_legacy_20260921_x_test.yaml --fps 62.6 --out ..\runs\v4_blockB\<nome>.csv` (da `cuasp_siamfc/`). Gli script di controllo (accordo tracker–detector, dettaglio delle perdite, provini con i box, prova del guadagno simulato) erano nella cartella temporanea della sessione: vanno riscritti se servono.
 
 **Prossimo passo: registrare frame IDS nell'ambiente reale e analizzarli (V4)** secondo `RECORDING_PROTOCOL.md`: blocco A scena vuota (priorità massima), B drone a 20–22 m, C con marker ArUco, D camera in movimento. Circa 35–40 minuti di riprese, 45–75 GB.
 
@@ -120,12 +142,17 @@ Quando l'utente ha le registrazioni (cartelle `recordings/<data_ora>_<nome>/`, g
 2. misurare il divario di dominio (dataset all'aperto contro uso al coperto) e i falsi positivi persistenti della scena, il limite noto della Fase 3;
 3. tarare `CV_SIAMFC_ACQUIRE_MIN_SCORE`, le soglie di perdita e la confidenza; se servono, aggiungere i frame etichettati al dataset del detector (PLAN Fase 2, punto 4).
 
-**Stato git:** tutto committato fino a `d50118d` "Recording env" (registratore, protocollo, binding). **Non ancora committati** (2026-11-16), da far committare all'utente: `settings.py`, `camera.py`, `cuasp.py`, `record_ids.py` v2, `test_record_ids.py`, `test_ids_camera_settings.py` (nuovo), `PROVENANCE.md`, `cuasp_siamfc/README.md`, `PLAN.md`, `RECORDING_PROTOCOL.md` e questo file.
+**Stato git:** tutto committato fino a `c975782` "Fix: fps" (impostazioni della camera, registratore v2). **Non ancora committati** (V5, 2026-11-16), da far committare all'utente: `tools/bench_siamfc.py` (`--frame-size`), `tools/replay_siamfc_source.py` (`--resize`, `--preload`, box grezzi del detector in `*_detections.csv`), `tests/test_replay_tool.py`, `cuasp_siamfc/README.md`, `PLAN.md` e questo file.
 
 **Ultima modifica fatta (2026-11-11), opzione A scelta dall'utente:** in `MotorCommandDispatcher` lo stop su perdita viene inviato dal worker `_run()` invece che da un task separato, quindi arriva sempre dopo un `abs_rotate` già in volo. Un comando la cui lettura encoder era in corso al momento della perdita viene scartato. È documentato come cambiamento di comportamento rispetto a C-UASP in `cuasp_siamfc/PROVENANCE.md` e nel README ("Behaviour changes with respect to C-UASP"). In C-UASP la corsa resta, perché quel repository non si modifica. Test end-to-end 30/30, suite 251 passati + 1 fallimento noto.
 
 **Poi, in ordine** (dettagli in `PLAN.md`, "Ordine di esecuzione"):
-1. V5 con detector e SiamFC insieme sulla GPU, su frame da 2040x1536 a 62,6 fps (budget 16,0 ms per frame). La misura precedente, su frame da 2592x1944, dava per `read_candidate` un p99 di 15,6–17,5 ms: al limite, da rimisurare.
+1. ✅/🟡 V5 fatto il 2026-11-16 (risultati in `runs/v5_2040x1536/`, README, PLAN). A 2040x1536 e 62,6 fps:
+   - `read_candidate` ha mediana 6,3 ms e p99 17,6 ms contro un budget di 16 ms;
+   - il 2,3 % dei frame sfora, mai due di fila, a circa 5 Hz: è la contesa con la verifica del detector;
+   - effetto pratico nullo (comandi motore ≤ 50 Hz). Il rimedio (YOLO senza `predict`) non è applicato: è una proposta.
+
+   Notato nella stessa prova: riprodurre i video DUT più velocemente peggiora il tracking su video15 (copertura 77 % a 50 fps contro 60 % a 62,6 fps, alla risoluzione nativa). È un artefatto: equivale a un drone più veloce rispetto alla logica a tempo del detector. Da verificare sulle registrazioni IDS vere. Per la taratura V4: `CV_SIAMFC_LOST_FRAMES` e `CV_SIAMFC_REF_FRAMES` sono in frame, quindi a 62,6 fps valgono 80 ms invece di 100.
 2. V3 (OTB) → V4b (ricerca iperparametri, circa 28 ore su questo PC) → V4 → taratura delle soglie.
 3. V7 confronterà gli angoli con il riferimento ArUco, usando la calibrazione scelta (l'override `_x_test`).
 4. V7 (banco, motori spenti) → V8 (banco, motori accesi: **ricordare all'utente che i motori sono disabilitati di default** e vanno abilitati esplicitamente; verificare sul banco che dopo lo stop su perdita non arrivino altri comandi).

@@ -5,7 +5,8 @@ Usage (from cuasp_siamfc/)::
     .venv/Scripts/python tools/bench_siamfc.py --weights ../pretrained/networks/baseline-conv5_gray_e100.pth
 
 Measures ``SiamFCTracker.update()`` end to end (CUDA-synchronised) on synthetic
-2592x1944 Mono8 frames, for several target sizes, with and without the
+Mono8 frames (``--frame-size``, default 2040x1536: the IDS camera in use since
+2026-11-16; 2592x1944 before), for several target sizes, with and without the
 per-frame template update (zLR). A stage breakdown (crop+H2D+resize, backbone,
 xcorr+upsample+peak, template update) is measured on the same inputs.
 Run it on every target machine: numbers depend on GPU, CPU and driver.
@@ -57,8 +58,8 @@ def _timed(fn, device: str) -> float:
     return (time.perf_counter() - t0) * 1e3
 
 
-def bench_update(net, device, target_px, z_lr, n=300, warmup=30) -> np.ndarray:
-    frames, centres = _frames(n + warmup + 1, (2592, 1944), target_px)
+def bench_update(net, device, target_px, z_lr, n=300, warmup=30, size_wh=(2040, 1536)) -> np.ndarray:
+    frames, centres = _frames(n + warmup + 1, size_wh, target_px)
     tr = SiamFCTracker(net, params_with(z_lr=z_lr), device=device)
     tr.init(frames[0], centres[0], (float(target_px), float(target_px)))
     times = [_timed(lambda f=f: tr.update(f), device) for f in frames[1:]]
@@ -66,8 +67,8 @@ def bench_update(net, device, target_px, z_lr, n=300, warmup=30) -> np.ndarray:
 
 
 @torch.inference_mode()
-def bench_stages(net, device, target_px, n=200) -> dict[str, float]:
-    frames, centres = _frames(n + 1, (2592, 1944), target_px)
+def bench_stages(net, device, target_px, n=200, size_wh=(2040, 1536)) -> dict[str, float]:
+    frames, centres = _frames(n + 1, size_wh, target_px)
     tr = SiamFCTracker(net, params_with(), device=device)
     tr.init(frames[0], centres[0], (float(target_px), float(target_px)))
     p = tr.p
@@ -93,18 +94,20 @@ def main() -> int:
     ap.add_argument("--weights", type=Path, required=True)
     ap.add_argument("--device", default=default_device())
     ap.add_argument("--targets", type=int, nargs="+", default=[16, 48, 150, 400])
+    ap.add_argument("--frame-size", type=int, nargs=2, default=[2040, 1536], metavar=("W", "H"))
     args = ap.parse_args()
+    size_wh = (int(args.frame_size[0]), int(args.frame_size[1]))
 
     net = SiamFCNet.from_file(args.weights)
     name = torch.cuda.get_device_name(0) if args.device.startswith("cuda") else "cpu"
-    print(f"device={args.device} ({name}) torch={torch.__version__} frame=2592x1944 Mono8")
+    print(f"device={args.device} ({name}) torch={torch.__version__} frame={size_wh[0]}x{size_wh[1]} Mono8")
     print(f"{'target px':>9} {'zLR':>7} {'mean ms':>8} {'p50':>7} {'p99':>7} {'max':>7} {'Hz@mean':>8}")
     for t in args.targets:
         for z_lr in (0.0102, 0.0):
-            ms = bench_update(net, args.device, t, z_lr)
+            ms = bench_update(net, args.device, t, z_lr, size_wh=size_wh)
             print(f"{t:>9} {z_lr:>7.4f} {ms.mean():>8.2f} {np.percentile(ms, 50):>7.2f} {np.percentile(ms, 99):>7.2f} {ms.max():>7.2f} {1e3 / ms.mean():>8.0f}")
     print("stage breakdown (median ms, target 48 px, zLR on):")
-    for k, v in bench_stages(net, args.device, 48).items():
+    for k, v in bench_stages(net, args.device, 48, size_wh=size_wh).items():
         print(f"  {k:<22} {v:6.2f}")
     return 0
 
