@@ -100,6 +100,10 @@ REPO_ROOT_DIR = SCRIPT_DIR.parent
 #           "control/suncubes/visual_servoing_calibration_interpolated.yaml",
 #       )
 #   )
+# cuasp_siamfc (2026-11-16): the user decided to keep this override (not the 2026-09-23
+# calibration.yaml) for the SiamFC work, accepting its inconsistencies (fx 24119 px vs the
+# "16mm" lens it names; its t_lc_m differs from boresight.yaml). Frames are 2040x1536, the
+# calibration size, so the intrinsics are used unscaled.
 CALIBRATION_YAML = REPO_ROOT_DIR / "calibration/calibration_legacy_20260921_x_test.yaml"
 IDS_DEVICE_INDEX = int(getattr(settings, "CV_IDS_DEVICE_INDEX", 0))
 IDS_PIXEL_FORMAT = str(getattr(settings, "CV_IDS_PIXEL_FORMAT", "Mono8"))
@@ -114,6 +118,8 @@ IDS_GAIN_DB = float(getattr(settings, "CV_IDS_GAIN_DB", 0.0))
 IDS_FRAME_RATE_TARGET_ENABLE = bool(int(getattr(settings, "CV_IDS_FRAME_RATE_TARGET_ENABLE", 1)))
 IDS_FRAME_RATE_TARGET_HZ = float(getattr(settings, "CV_IDS_FRAME_RATE_TARGET_HZ", 70.0))
 IDS_GENTL_CTI_PATH = str(getattr(settings, "CV_IDS_GENTL_CTI_PATH", ""))
+# cuasp_siamfc (2026-11-16): camera link bandwidth limit, bytes/s (0 = camera's own value).
+IDS_LINK_THROUGHPUT_LIMIT_BPS = float(getattr(settings, "CV_IDS_LINK_THROUGHPUT_LIMIT_BPS", 0))
 
 # Gating applied by CameraAPI before a sample is exposed as reliable. Detection
 # speed/ROI/KLT/target-fusion tuning (CV_CUAS_*, CV_ARUCO_SCOUT_*, etc.) is read
@@ -1036,6 +1042,8 @@ def _build_camera_config() -> CameraConfig:
         ids_cfg["frame_rate_target_hz"] = IDS_FRAME_RATE_TARGET_HZ
     if IDS_GENTL_CTI_PATH:
         ids_cfg["gentl_cti_path"] = IDS_GENTL_CTI_PATH
+    if IDS_LINK_THROUGHPUT_LIMIT_BPS > 0.0:
+        ids_cfg["link_throughput_limit_bps"] = IDS_LINK_THROUGHPUT_LIMIT_BPS
 
     source_cfg: dict[str, Any] = {
         "ids_peak": ids_cfg,

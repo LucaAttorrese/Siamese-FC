@@ -8,7 +8,9 @@ import json
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 _TOOLS = Path(__file__).resolve().parents[1] / "tools"
@@ -110,7 +112,112 @@ def test_command_line_dry_run_writes_meta(rec, tmp_path, monkeypatch, capsys):
     assert meta["camera"]["ids_peak"]["pixel_format"] == "Mono8"  # runtime settings from cuasp
     assert st["frames_written"] == len(list((seq_dirs[0] / "frames").glob("*.jpg"))) > 15
     assert st["dropped_capture"] == st["dropped_writer"] == 0
-    assert "saved" in capsys.readouterr().out
+    # the synthetic frames use the requested size, so the size reported is the frame's own
+    req = meta["camera"]["ids_peak"]
+    assert (st["frame_width"], st["frame_height"]) == (req["width"], req["height"])
+    cal = meta["camera"]["calibration_summary"]
+    assert cal["image_width"] > 0 and cal["fx"] > 0
+    calib_mismatch = (cal["image_width"], cal["image_height"]) != (req["width"], req["height"])
+    assert any("calibration" in n for n in meta["checks"]) == calib_mismatch
+    assert "readback" not in meta["camera"]  # synthetic: no camera to read back
+    out = capsys.readouterr().out
+    assert "saved" in out and "gray levels" in out
+
+
+class _ListProducer:
+    """Delivers the given frames once, with consecutive sequence numbers."""
+
+    def __init__(self, frames):
+        self._frames = frames
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def wait_newer(self, last_sequence, timeout_s):
+        if last_sequence >= len(self._frames):
+            time.sleep(0.01)
+            return None
+        return SimpleNamespace(sequence=last_sequence + 1, gray=self._frames[last_sequence],
+                               ts_capture_ns=(last_sequence + 1) * 20_000_000)
+
+
+def test_summary_reports_the_actual_frame_size_and_gray_levels(rec, tmp_path):
+    frames = [np.full((48, 64), 40, np.uint8) for _ in range(30)]
+    _, _, s = _run(rec, tmp_path, _ListProducer(frames), max_frames=30)
+    assert (s["frame_width"], s["frame_height"]) == (64, 48)
+    assert s["frame_size_changes"] == 0
+    g = s["gray_levels"]
+    assert g["samples"] == 2  # frames 0 and 25
+    assert g["mean"] == g["p1"] == g["p50"] == g["p99"] == 40 and g["saturated_pct_max"] == 0
+
+
+def test_frame_size_changes_are_counted(rec, tmp_path):
+    frames = [np.zeros((48, 64), np.uint8)] * 3 + [np.zeros((40, 64), np.uint8)] * 2
+    _, _, s = _run(rec, tmp_path, _ListProducer(frames), max_frames=5)
+    assert (s["frame_width"], s["frame_height"]) == (64, 48)  # the first frame's size
+    assert s["frame_size_changes"] == 2
+
+
+def test_gray_levels_of_a_half_saturated_frame(rec):
+    gray = np.zeros((64, 64), np.uint8)
+    gray[:, 32:] = 255
+    mean, p1, p50, p99, sat = rec.gray_levels(gray, step=1)
+    assert mean == pytest.approx(127.5) and p1 == 0 and p99 == 255 and sat == pytest.approx(50.0)
+
+
+class _Node:
+    def __init__(self, value=None, entry=None, maximum=None):
+        self._value, self._entry, self._max = value, entry, maximum
+
+    def Value(self):
+        if self._value is None:
+            raise RuntimeError("not a value node")
+        return self._value
+
+    def CurrentEntry(self):
+        if self._entry is None:
+            raise RuntimeError("not an enumeration")
+        return SimpleNamespace(SymbolicValue=lambda: self._entry)
+
+    def Maximum(self):
+        if self._max is None:
+            raise RuntimeError("no maximum")
+        return self._max
+
+
+class _NodeMap:
+    def __init__(self, nodes):
+        self._nodes = nodes
+
+    def FindNode(self, name):
+        if name not in self._nodes:
+            raise KeyError(name)
+        return self._nodes[name]
+
+
+def test_read_nodes_reads_values_enumerations_and_maxima_without_setting_anything(rec):
+    nm = _NodeMap({"Width": _Node(2040, maximum=2040), "PixelFormat": _Node(entry="Mono8"),
+                   "AcquisitionFrameRate": _Node(43.22, maximum=43.22), "DeviceModelName": _Node("U3-33DxXCP-M")})
+    out = rec.read_nodes(nm)
+    assert out["Width"] == 2040 and out["Width_max"] == 2040.0
+    assert out["PixelFormat"] == "Mono8" and out["DeviceModelName"] == "U3-33DxXCP-M"
+    assert out["AcquisitionFrameRate_max"] == pytest.approx(43.22)
+    assert "Height" not in out  # missing nodes are skipped
+
+
+def test_consistency_checks(rec):
+    ok = {"frame_width": 2040, "frame_height": 1536, "frame_size_changes": 0,
+          "gray_levels": {"p99": 200.0, "saturated_pct_max": 0.0}}
+    assert rec.consistency_checks(ok, (2040, 1536), (2040, 1536)) == []
+    notes = rec.consistency_checks(ok, (2592, 1944), (2040, 1536))  # the 2026-11-16 camera test
+    assert len(notes) == 1 and "2592x1944" in notes[0] and "readback" in notes[0]
+    dark = {**ok, "gray_levels": {"p99": 35.0, "saturated_pct_max": 2.5}}
+    notes = rec.consistency_checks(dark, (2040, 1536), (2592, 1944))
+    assert len(notes) == 3
+    assert any("calibration" in n for n in notes) and any("dark" in n for n in notes) and any("saturated" in n for n in notes)
 
 
 def test_invalid_names_are_refused(rec, monkeypatch, tmp_path):

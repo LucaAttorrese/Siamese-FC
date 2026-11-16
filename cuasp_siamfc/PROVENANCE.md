@@ -80,6 +80,43 @@ These alter how the copied runtime behaves, not only what it is configured to do
    `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` (C-UASP: 1), so a first SiamFC run cannot move the
    motors by mistake. Enable deliberately for the motors-on bench test only.
 
+3. **Camera gain set in explicit units; invalid gain fails the camera start**
+   (`control/suncubes/camera.py`, `_set_gain_db()`, 2026-11-16).
+   - C-UASP: `_IdsLatestFrameProducer` wrote `CV_IDS_GAIN_DB` into the `Gain` node unchanged,
+     through `_try_set_node()`, which swallows errors. On the camera in use (IDS
+     U3-33DxXCP-M, Sony IMX900) `Gain` is a linear factor (no unit, 1.0-15.85, i.e. 0-24 dB).
+     The configured 0.0 was below the minimum, rejected and silently ignored, so the gain was
+     whatever the camera had. Any value >= 1 would have been applied as a factor, not in dB
+     (6 "dB" -> 15.6 dB).
+   - Here: the dB value is converted to a factor (`10**(dB/20)`) unless the node declares the
+     unit "dB". It is checked against the node range: out of range or rejected -> exception,
+     the camera start fails (`IDS capture start failed: ...`). `validate()` rejects a
+     negative `CV_IDS_GAIN_DB`. With the current 0 dB the camera receives 1.0, the value it
+     already had, so the images are unchanged.
+
+4. **Camera link bandwidth limit set by the runtime** (`control/suncubes/camera.py`,
+   `_set_link_throughput_limit_bps()`; `control/cuasp.py`; `control/suncubes/settings.py`
+   `CV_IDS_LINK_THROUGHPUT_LIMIT_BPS`, 2026-11-16).
+   - C-UASP does not touch `DeviceLinkThroughputLimit`. The camera's UserSet1 value,
+     162 MB/s, capped the frame rate at 43.2 fps whatever the exposure.
+   - Here: set to 300 MB/s (camera maximum; the link speed is 500 MB/s) before the
+     frame-rate target. The unit must be bytes/s; out of range, off-step or rejected ->
+     exception, the camera start fails. 0 keeps the camera's own value.
+
+5. **Camera settings matched to the camera in use** (`control/suncubes/settings.py`,
+   2026-11-16, user decisions):
+   - `CV_IDS_WIDTH`/`CV_IDS_HEIGHT` 2592x1944 -> **2040x1536**. 2592x1944 exceeds the 2064x1552
+     sensor: the camera rejected it silently and kept the 2040x1536 ROI at offset (8, 8)
+     from UserSet1, which is also the calibration size. Frames do not change; the request
+     now matches them. The offsets are still not set by the runtime.
+   - `CV_IDS_EXPOSURE_TIME_US` 20000 -> **15000**: with change 4 the camera runs at 62.6 fps
+     (16.0 ms per frame) instead of 43.2 fps; images are 25 % darker than at 20 ms.
+   - Verified on the camera: `tools/record_ids.py` readback on 2026-11-16 (300 MB/s, 15 ms,
+     gain 1.0, 2040x1536 at (8, 8), 62.61 fps, no frames lost).
+   - Calibration: `control/cuasp.py` keeps the C-UASP temporary override
+     `calibration/calibration_legacy_20260921_x_test.yaml` (user decision of 2026-11-16,
+     inconsistencies accepted); only a comment was added.
+
 ### Integration changes (SiamFC tracker, PLAN.md Phases 3-4)
 
 - `control/cuasp.py`: `CV_TARGET_TRACKER` selection (`TARGET_TRACKER`, default `"siamfc"`);
@@ -103,7 +140,8 @@ These alter how the copied runtime behaves, not only what it is configured to do
 New files (not copies): `control/suncubes/siamfc_source.py`, `control/suncubes/siamfc/`,
 `tools/`, the other `tests/test_siamfc_*`, `tests/test_eval_detector.py`,
 `tests/test_replay_tool.py`, `tests/test_train_detector_stop.py`,
-`tests/test_cuasp_siamfc_e2e.py`, `tests/test_motor_dispatcher_stop_order.py`.
+`tests/test_cuasp_siamfc_e2e.py`, `tests/test_motor_dispatcher_stop_order.py`,
+`tests/test_record_ids.py`, `tests/test_ids_camera_settings.py`.
 
 ## Baseline test status at copy time
 

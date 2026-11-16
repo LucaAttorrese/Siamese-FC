@@ -12,14 +12,14 @@ Obiettivo: sostituire la parte ArUco/PnP con il tracker **SiamFC**, lasciando in
 
 | Tema | Decisione |
 |---|---|
-| Camera | Resta la **IDS** (Mono8, 2592x1944 in `settings.py`, target 70 Hz, teleobiettivo). Niente OAK. |
+| Camera | Resta la **IDS**: U3-33DxXCP-M, Sony IMX900 global shutter, 2064x1552, pixel da 2,25 µm, teleobiettivo, Mono8. Niente OAK. Dalla prova del 2026-11-16: frame **2040x1536** (ROI di `UserSet1`; il 2592x1944 ereditato veniva rifiutato, ora `settings.py` chiede 2040x1536). Con esposizione a 15 ms e banda della camera a 300 MB/s: **62,6 fps**. |
 | Calcolo | Tutto sull'host. Sviluppo: portatile con RTX 4060 (8 GB). **Training ed esercizio: portatile con RTX 5060 Laptop (8 GB)**, Ryzen 7 260, 31 GB di RAM. Sostituisce il PC con RTX 5090 previsto il 2026-11-04 (decisione del 2026-11-06). Stessa memoria video del portatile di sviluppo: batch 3 a 1280 px, training più lunghi che sulla 5090. |
 | Python | **3.13 o successivo.** Su Windows, con 3.12, `time.monotonic()` avanza a scatti di 16 ms, più di un frame a 70 Hz (vedi Rischi). |
 | Pesi SiamFC | L'originale `2016-08-17.net.mat` non è più scaricabile. Si usa **CFNet "Baseline-conv5"**, variante addestrata in grigio `baseline-conv5_gray_e100.mat` (Valmadre et al., CVPR 2017). La RGB `baseline-conv5_e55.mat` serve solo per i confronti. |
 | Inizializzazione e recupero | **Detector YOLO** (Ultralytics YOLO11) addestrato su droni, asincrono a bassa frequenza, come oggi l'ArUco. |
 | Licenza Ultralytics | AGPL-3.0, **accettata** perché il sistema serve per ora solo a validare l'approccio (2026-11-06). Per un prodotto non open source servirebbe una licenza Enterprise o un detector con licenza permissiva. |
 | Ambiente operativo | **Al coperto e illuminato** (2026-11-09). Per ora non è previsto l'uso all'esterno di notte con luci urbane: il punto debole notturno del detector (Fase 2, punto 2) non è prioritario. |
-| Bersaglio e distanza | **DJI Mavic Mini o simile** (circa 245 × 290 × 56 mm aperto con eliche) a **20–22 m** (2026-11-09). Dimensione attesa nel frame IDS, con fx ≈ 21 060 / 26 760 px: lato √(w·h) circa 130–160 px visto di lato, circa 270–340 px visto da sotto. Campo visivo orizzontale a 21 m: circa 2,6 / 2,0 m. |
+| Bersaglio e distanza | **DJI Mavic Mini o simile** (circa 245 × 290 × 56 mm aperto con eliche) a **20–22 m** (2026-11-09). Dimensione attesa nel frame IDS da 2040x1536, con fx ≈ 21 060 / 24 120 px (le due calibrazioni): lato √(w·h) circa 130–145 px visto di lato, circa 265–305 px visto da sotto. Campo visivo a 21 m: circa 2,0 / 1,8 m in larghezza e 1,5 / 1,3 m in altezza. |
 | Distanza Z (parallasse camera→laser, `t_lc` ≈ −18 cm) | **Z fissa configurabile** in `settings.py`; valore proposto `CV_SIAMFC_TARGET_RANGE_M = 21` (centro dell'intervallo 20–22 m), con errore di parallasse massimo circa 0,43 mrad (circa 9–11 px) per Z vera tra 20 e 22 m. |
 | Repository | **C-UASP non si modifica mai.** I file sono copiati in `Siamese-FC/cuasp_siamfc/` (provenienza e hash in `cuasp_siamfc/PROVENANCE.md`) e modificati solo lì. |
 | Git | **Nessuna operazione git senza permesso esplicito dell'utente**: commit e push li fa lui. |
@@ -199,7 +199,7 @@ Specifica originale:
 | V3 benchmark | OTB-2013/OTB-100 (toolkit `got10k`), rete RGB su RGB e rete grigia su OTB convertito in grigio | Vedi P1 | ⏳ |
 | V4 dominio drone | DUT tracking, Anti-UAV300 test e sequenze IDS registrate (registratore Mono8 con `ts_capture_ns`) | Success/precision, errore del centro in px **e in mrad** (÷fx), tempo di riaggancio, falsi riagganci | ⏳ |
 | V4b ricerca iperparametri | Random search, procedura del paper App. F (sezione sotto) | I parametri tarati devono battere quelli della Tab. 2 sul test held-out, altrimenti restano quelli del paper | ⏳ Da fare sul PC di training |
-| V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame (14.3 ms a 70 Hz, 20 ms a 50 fps) con il detector attivo | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5060 Laptop (PC di training): 5.9–8.1 ms medi, p99 ≤ 9.2 ms. Manca la misura con il detector attivo sulla stessa GPU |
+| V5 latenza | `tools/bench_siamfc.py` su frame 2592x1944 | Entro il budget del frame con il detector attivo: 16,0 ms a 62,6 fps (camera dal 2026-11-16) | 🟡 4060: 6.9–8.9 ms medi fino a target di 400 px. 5060 Laptop (PC di training): 5.9–8.1 ms medi, p99 ≤ 9.2 ms. Manca la misura con il detector attivo sulla stessa GPU |
 | V6 pytest | Suite in `cuasp_siamfc/tests` | Tutto verde; senza torch i test SiamFC vengono saltati, non falliscono | 🟡 Verde, a parte il test ArUco già rotto in C-UASP (2026-11-11: 251 passati + 1; e2e `cuasp.main()` → server motori simulato stabile, 30/30) |
 | V7 banco, motori spenti | IDS dal vivo con `CV_CUAS_ENABLE_MOTOR_COMMANDS=0`. Drone **con ArUco montati**: la pipeline ArUco registrata fa da riferimento offline per SiamFC sugli stessi frame | Differenza angolare entro un budget da concordare; segni az/po corretti | ⏳ |
 | V8 banco, motori accesi | Gain ridotto, poi nominale; prova di perdita e riaggancio → `stop[0]=1`. **Promemoria (richiesto dall'utente il 2026-11-10): i comandi motore sono disabilitati di default (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`); vanno abilitati esplicitamente solo per questa prova, ricordandolo all'utente prima di iniziare.** La corsa stop/`abs` del dispatcher è risolta (Fase 4, 2026-11-11): in V8 verificare sul banco che dopo lo stop su perdita non arrivino altri comandi | Nessuna oscillazione nuova, stop su perdita verificato | ⏳ |
@@ -254,8 +254,15 @@ Specifica originale:
 
 ## Rischi e punti aperti
 
-- **Focale ambigua** (ereditato da C-UASP): i YAML di calibrazione sono a 2040x1536 (fx ≈ 21 060 px), `settings.py` acquisisce a 2592x1944 e `camera.py` riscala K (fx ≈ 26 760 px). Il commento nel YAML ammette che la risoluzione reale non è chiara. Va risolto prima di V7: incide del 27 % su pixel e angoli.
-- **Esposizione e frame rate**: `CV_IDS_EXPOSURE_TIME_US = 20000` con target di 70 Hz. 20 ms di esposizione limitano la camera a circa 50 fps; verificare sul banco.
+- **Focale** (ereditato da C-UASP). L'ambiguità del 27 % è risolta dalla prova del 2026-11-16: la camera consegna 2040x1536, la stessa risoluzione delle calibrazioni, e il runtime riscala K con le dimensioni reali, quindi con fattore 1. Decisione dell'utente (2026-11-16): si tiene l'override `calibration_legacy_20260921_x_test.yaml` (fx 24 119, cx 1140) e non il più recente `calibration.yaml` (fx 21 062, cx 697), accettando le incoerenze:
+  - con pixel da 2,25 µm le fx corrispondono a 47–54 mm di focale, mentre i YAML indicano un obiettivo da 16 mm;
+  - la calibrazione vale solo con il ROI 2040x1536 a offset (8, 8) salvato in `UserSet1`, perché il runtime non imposta gli offset.
+
+  V7 confronterà comunque gli angoli con il riferimento ArUco.
+- **Esposizione e frame rate** (misurati il 2026-11-16). All'inizio 43,2 fps, limitati da `DeviceLinkThroughputLimit` = 162 MB/s salvato nella camera. Con 300 MB/s la camera concede 47,7 fps a 20 ms, 62,6 a 15 ms, 67,9 a 12 ms o meno; i 70 Hz non sono raggiungibili con questo ROI.
+
+  **Decisione dell'utente (2026-11-16): 15 ms**, con il runtime che imposta la banda a 300 MB/s (`CV_IDS_LINK_THROUGHPUT_LIMIT_BPS`). Verificato: 62,6 fps, 0 perdite. Le immagini sono il 25 % più scure che a 20 ms; a 21 m il mosso è di circa 15–17 px per ogni m/s di moto laterale del drone.
+- **Unità del guadagno**: corretto il 2026-11-16 (`camera.py`, `_set_gain_db()`). Il valore in dB viene convertito nel fattore lineare della camera (1,0–15,85); un valore fuori range fa fallire l'avvio della camera. Per tornare alla luminosità dei 20 ms bastano +2,5 dB.
 - **Moto relativo e gimbal**: SiamFC tollera uno spostamento di circa la dimensione del bersaglio per frame, cioè circa L/D rad per frame (drone di 35 cm a 50 fps: circa 10°/s a 100 m, circa 2°/s a 500 m). Un `abs_rotate` ampio, per esempio al riaggancio con il clamp a 30°, fa uscire il target dalla regione di ricerca. Vedi P3.
 - **Grigio contro RGB**: mitigato dalla rete addestrata in grigio. La perdita va misurata in V3/V4.
 - **Target piccoli e grandi**: sotto circa 16 px (indicativo; un drone di 35 cm ci arriva a circa 460–585 m) degradano tracker e detector. Sopra circa 400 px la latenza cresce, problema mitigato dalla copia in uint8.
@@ -281,6 +288,19 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 2. ✅ Ricostruzione dei dataset (`datasets/MANIFEST.md`) il 2026-11-06: hash e conteggi uguali al MANIFEST.
 3. ✅ Training del detector YOLO11s (completato il 2026-11-09, test complessivo mAP50 0,949 / mAP50-95 0,593). Valutazione per sorgente e per dimensione ✅ (vedi Fase 2, punto 2).
 4. ✅ `detector.py` + adapter `ids_siamfc` + routing, settings e `cuasp.py` (Fasi 3–4) → V6 pytest + E2E (2026-11-10 / 11; corsa stop/`abs` del dispatcher risolta).
-4b. ⏳ Registrazione di frame IDS nell'ambiente reale, al coperto, anche a scena vuota, e analisi con `tools/replay_siamfc_source.py` (V4, falsi positivi, taratura delle soglie); V5 con detector e SiamFC insieme. Pronti (2026-11-11): il protocollo `RECORDING_PROTOCOL.md` (blocchi A scena vuota, B drone a 20–22 m, C con marker ArUco, D camera in movimento; circa 35–40 min di riprese, 100–180 GB) e il registratore `cuasp_siamfc/tools/record_ids.py` (ogni frame con timestamp, impostazioni del runtime; provato in modalità sintetica a 5 MP: 0 perdite a 50 e a 70 fps). In attesa della sessione di registrazione dell'utente.
+4b. ⏳ Registrazione di frame IDS nell'ambiente reale, al coperto, anche a scena vuota, e analisi con `tools/replay_siamfc_source.py` (V4, falsi positivi, taratura delle soglie); V5 con detector e SiamFC insieme. Pronti (2026-11-11): il protocollo `RECORDING_PROTOCOL.md` (blocchi A scena vuota, B drone a 20–22 m, C con marker ArUco, D camera in movimento; circa 35–40 min di riprese, 100–180 GB) e il registratore `cuasp_siamfc/tools/record_ids.py` (ogni frame con timestamp, impostazioni del runtime; provato in modalità sintetica a 5 MP: 0 perdite a 50 e a 70 fps).
+
+   **Prima prova con la camera (2026-11-16):**
+   - Mono8 corretto, 0 perdite, 43,2 fps, frame 2040x1536, circa 0,3–0,5 MB per frame in JPEG;
+   - immagini scure sulla scena di prova (livello medio 26–84 su 255);
+   - registratore portato alla v2: dimensione reale, livelli di grigio, rilettura dei nodi della camera e controlli in `meta.json`.
+
+   Decisioni dell'utente dello stesso giorno, applicate e verificate con la camera:
+   - risoluzione richiesta 2040x1536;
+   - guadagno in unità esplicite;
+   - esposizione a 15 ms con banda a 300 MB/s, quindi 62,6 fps;
+   - calibrazione: resta l'override `_x_test`.
+
+   La camera è pronta per la sessione di registrazione.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

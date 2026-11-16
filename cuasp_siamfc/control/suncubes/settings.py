@@ -54,18 +54,33 @@ CV_CAMERA_CALIBRATION_YAML = "calibration/calibration.yaml"
 
 CV_IDS_DEVICE_INDEX = 0
 CV_IDS_PIXEL_FORMAT = "Mono8"
-CV_IDS_WIDTH = 2592  # px
-CV_IDS_HEIGHT = 1944  # px
+# cuasp_siamfc (2026-11-16): was 2592x1944 in C-UASP, larger than the sensor of the camera in use
+# (IDS U3-33DxXCP-M, Sony IMX900, 2064x1552): the camera rejected it silently and kept the
+# 2040x1536 ROI at offset (8, 8) that it loads from UserSet1 at power-on, which is also the
+# calibration size. The request now matches the real frames. The offsets are not set here:
+# they come from UserSet1, so do not change the ROI or save user sets with IDS peak Cockpit.
+CV_IDS_WIDTH = 2040  # px
+CV_IDS_HEIGHT = 1536  # px
 CV_IDS_BUFFER_TIMEOUT_MS = 100
 CV_IDS_ACQUISITION_MODE = "Continuous"
 CV_IDS_EXPOSURE_AUTO = "Off"
 CV_IDS_GAIN_AUTO = "Off"
-CV_IDS_EXPOSURE_TIME_US = 20000.0
+CV_IDS_EXPOSURE_TIME_US = 15000.0
 # 2026-09-21: was 5000.0 (tuned for a fast-moving outdoor target). Confirmed
 # by the operator as the new real value -- the previous value left the
 # current operating scene near-black (mean pixel ~18/255, confirmed by direct
 # capture during roughtest smoke tests) and unusable for cv2.aruco detection.
-CV_IDS_GAIN_DB = 0.0
+# cuasp_siamfc (2026-11-16): 20000.0 -> 15000.0 (user decision): with
+# CV_IDS_LINK_THROUGHPUT_LIMIT_BPS = 300 MB/s the camera allows 62.6 fps instead of 47.7 fps
+# at 20 ms, with less motion blur; images are 25 % darker than at 20 ms.
+CV_IDS_GAIN_DB = 0.0  # dB, >= 0. cuasp_siamfc: camera.py converts it to the camera's linear factor
+# (10**(dB/20)) when the Gain node is a factor, as on the U3-33DxXCP-M (1.0-15.85, i.e. 0-24 dB);
+# out of range -> the camera start fails. In C-UASP the dB value was written as a factor.
+# Bandwidth limit of the camera link in bytes/s (GenICam DeviceLinkThroughputLimit, unit Bps);
+# 0 = keep the camera's own value. cuasp_siamfc (2026-11-16): the camera's UserSet1 value,
+# 162 MB/s, capped the frame rate at 43.2 fps whatever the exposure. Measured maxima at
+# 2040x1536 with 300 MB/s: 47.7 fps at 20 ms, 62.6 fps at 15 ms, 67.9 fps at <= 12 ms.
+CV_IDS_LINK_THROUGHPUT_LIMIT_BPS = 300_000_000
 CV_IDS_FRAME_RATE_TARGET_ENABLE = 1
 CV_IDS_FRAME_RATE_TARGET_HZ = 70.0
 CV_IDS_GENTL_CTI_PATH = ""
@@ -431,6 +446,8 @@ def validate() -> None:
         "CV_CUAS_FULL_FRAME_RECOVERY_HZ",
         "CV_ARUCO_CONFIDENCE_MIN",
         "CV_CUAS_MOTOR_COMMAND_MIN_INTERVAL_S",
+        "CV_IDS_GAIN_DB",  # cuasp_siamfc: a gain factor < 1 (negative dB) is not accepted by the camera
+        "CV_IDS_LINK_THROUGHPUT_LIMIT_BPS",  # cuasp_siamfc: 0 = camera's own value
     ):
         _non_negative(name, globals()[name])
 

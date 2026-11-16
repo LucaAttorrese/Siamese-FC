@@ -19,7 +19,13 @@ Output: ``<out>/<YYYYMMDD_HHMMSS>_<name>/`` (default out: ``../recordings``, git
   ``tools/replay_siamfc_source.py``;
 - ``timestamps.csv``: ``frame,sequence,ts_capture_ns`` (written while recording);
 - ``meta.json``: notes, distance, block, camera settings, calibration in use, software
-  version, and statistics: frames, losses, measured frame rate, timestamp gaps.
+  version, and statistics: frames, losses, measured frame rate, timestamp gaps, the
+  **actual** frame size and the gray levels (sampled). For the real camera, ``camera.readback``
+  holds the node values read back (read-only) after the recording: the settings are only a
+  request, and the camera silently keeps its own value when it rejects one (2026-11-16: the
+  U3-33DxXCP-M, Sony IMX900 2064x1552, keeps its 2040x1536 ROI when 2592x1944 is requested).
+  ``checks`` lists mismatches: frame size against the requested size and against the
+  calibration size, size changes during the recording, saturated or very dark frames.
 
 Losses are counted, never hidden:
 - ``dropped_capture``: frames the camera delivered that this tool did not take (gaps in the
@@ -56,8 +62,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "control"))
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO / "recordings"
-TOOL_VERSION = "2026-11-11-record-ids-v1"
+TOOL_VERSION = "2026-11-16-record-ids-v2"
 BLOCKS = ("A", "B", "C", "D", "other")
+# Camera nodes read back after the recording; for the *_MAX ones the node maximum is stored too
+# (AcquisitionFrameRate's maximum is the frame rate the camera allows at the current exposure).
+READBACK_NODES = (
+    "DeviceModelName", "DeviceSerialNumber", "DeviceFirmwareVersion", "SensorName", "SensorWidth", "SensorHeight",
+    "SensorPixelWidth", "SensorPixelHeight", "SensorShutterMode", "UserSetDefault", "PixelFormat", "Width", "Height",
+    "OffsetX", "OffsetY", "BinningHorizontal", "BinningVertical", "ExposureTime", "Gain", "BlackLevel",
+    "AcquisitionFrameRate", "AcquisitionFrameRateTarget", "AcquisitionFrameRateTargetEnable",
+    "DeviceLinkThroughputLimit", "DeviceLinkSpeed", "AcquisitionMode", "TriggerMode",
+)
+READBACK_NODES_MAX = ("AcquisitionFrameRate", "Gain", "Width", "Height")
+GRAY_SAMPLE_EVERY = 25  # frames between gray-level samples
+DARK_P99 = 64  # 99th percentile below this gray level: flagged as very dark
+SATURATED_PCT = 1.0  # more than this % of pixels at 255 in a sample: flagged as saturated
 
 
 # ============================================================================ producers
@@ -173,8 +192,10 @@ class Recorder:
         self._lock = threading.Lock()
         self.stats: dict[str, Any] = {
             "frames_taken": 0, "frames_written": 0, "dropped_capture": 0, "dropped_writer": 0,
-            "write_errors": 0, "bytes_written": 0,
+            "write_errors": 0, "bytes_written": 0, "frame_size_changes": 0,
         }
+        self.frame_hw: Optional[tuple[int, int]] = None  # (height, width) of the first frame
+        self._gray_samples: list[tuple[float, float, float, float, float]] = []
         self._ts: list[int] = []
         self.t_start: Optional[float] = None
         self.t_end: Optional[float] = None
@@ -238,6 +259,14 @@ class Recorder:
                     last_seq = seq
                     with self._lock:
                         self.stats["frames_taken"] += 1
+                    hw = (int(packet.gray.shape[0]), int(packet.gray.shape[1]))
+                    if self.frame_hw is None:
+                        self.frame_hw = hw
+                    elif hw != self.frame_hw:
+                        with self._lock:
+                            self.stats["frame_size_changes"] += 1
+                    if index % GRAY_SAMPLE_EVERY == 0:
+                        self._gray_samples.append(gray_levels(packet.gray))
                     try:
                         # The producer publishes a fresh array per frame and never mutates it: no copy needed.
                         self._queue.put_nowait((index, packet.gray))
@@ -273,7 +302,29 @@ class Recorder:
             out["measured_fps"], out["frame_interval_ms"], out["timestamp_gaps"] = None, None, 0
         written = out["frames_written"]
         out["mean_frame_mb"] = round(out["bytes_written"] / written / 1e6, 3) if written else None
+        out["frame_width"] = None if self.frame_hw is None else self.frame_hw[1]
+        out["frame_height"] = None if self.frame_hw is None else self.frame_hw[0]
+        if self._gray_samples:
+            g = np.asarray(self._gray_samples, np.float64)
+            out["gray_levels"] = {
+                "samples": int(len(g)), "mean": round(float(np.median(g[:, 0])), 1),
+                "p1": round(float(np.median(g[:, 1])), 1), "p50": round(float(np.median(g[:, 2])), 1),
+                "p99": round(float(np.median(g[:, 3])), 1), "saturated_pct_max": round(float(g[:, 4].max()), 3),
+            }
+        else:
+            out["gray_levels"] = None
         return out
+
+
+def gray_levels(gray: np.ndarray, step: int = 8) -> tuple[float, float, float, float, float]:
+    """``(mean, p1, p50, p99, % of pixels at 255)`` of an 8-bit frame subsampled by ``step``
+    (a histogram, so well under 1 ms on a 3 MP frame: safe in the capture loop)."""
+    sub = np.ascontiguousarray(np.asarray(gray, np.uint8)[::step, ::step]).ravel()
+    n = max(int(sub.size), 1)
+    hist = np.bincount(sub, minlength=256).astype(np.float64)
+    cdf = np.cumsum(hist) / n
+    p1, p50, p99 = (float(np.searchsorted(cdf, q)) for q in (0.01, 0.5, 0.99))
+    return float(sub.mean()) if sub.size else 0.0, p1, p50, p99, float(hist[255] * 100.0 / n)
 
 
 # ============================================================================ helpers
@@ -301,6 +352,87 @@ def runtime_camera_settings() -> dict[str, Any]:
         "calibration": str(cuasp.CALIBRATION_YAML),
         "settings": {n: getattr(settings, n) for n in dir(settings) if n.startswith("CV_IDS_")},
     }
+
+
+def calibration_summary(path: Path) -> dict[str, Any]:
+    """Image size and focal lengths of the calibration the runtime uses (same loader as camera.py)."""
+    from suncubes.camera import _load_vs_calibration_for_camera  # noqa: PLC0415
+
+    cal = _load_vs_calibration_for_camera(Path(path))
+    k = np.asarray(cal["camera_matrix"], np.float64).reshape(3, 3)
+    return {"image_width": int(cal["image_width"]), "image_height": int(cal["image_height"]),
+            "fx": round(float(k[0, 0]), 1), "fy": round(float(k[1, 1]), 1),
+            "cx": round(float(k[0, 2]), 1), "cy": round(float(k[1, 2]), 1)}
+
+
+def read_nodes(nodemap: Any, names=READBACK_NODES, max_names=READBACK_NODES_MAX) -> dict[str, Any]:
+    """Current value of each GenICam node in ``names`` (enumerations by symbolic name), plus
+    ``<name>_max`` for ``max_names``. Read-only: nothing is set. Missing nodes are skipped."""
+    out: dict[str, Any] = {}
+    for name in names:
+        try:
+            node = nodemap.FindNode(name)
+        except Exception:  # noqa: BLE001
+            continue
+        for getter in (lambda n: n.CurrentEntry().SymbolicValue(), lambda n: n.Value()):
+            try:
+                value = getter(node)
+            except Exception:  # noqa: BLE001
+                continue
+            out[name] = value if isinstance(value, (bool, int, float, str)) else str(value)
+            break
+        if name in max_names:
+            try:
+                out[f"{name}_max"] = float(node.Maximum())
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
+def read_ids_camera_state(device_index: int = 0) -> dict[str, Any]:
+    """Opens the camera read-only, after the producer has released it, and reads ``READBACK_NODES``.
+    The values set by the producer persist in the camera until it is reset or powered off."""
+    from suncubes.camera import _load_ids_modules  # noqa: PLC0415
+
+    ids_peak, _ = _load_ids_modules()
+    ids_peak.Library.Initialize()
+    try:
+        dm = ids_peak.DeviceManager.Instance()
+        dm.Update()
+        count = int(dm.Devices().size())
+        if not 0 <= int(device_index) < count:
+            return {"error": f"device_index {device_index} not found ({count} devices)"}
+        device = dm.Devices()[int(device_index)].OpenDevice(ids_peak.DeviceAccessType_ReadOnly)
+        try:
+            return read_nodes(device.RemoteDevice().NodeMaps()[0])
+        finally:
+            del device
+    finally:
+        ids_peak.Library.Close()
+
+
+def consistency_checks(summary: dict[str, Any], requested_wh: Optional[tuple[int, int]],
+                       calibration_wh: Optional[tuple[int, int]]) -> list[str]:
+    """Human-readable warnings about the recording; empty when everything is consistent."""
+    notes: list[str] = []
+    fw, fh = summary.get("frame_width"), summary.get("frame_height")
+    if fw is None or fh is None:
+        return notes
+    if requested_wh is not None and tuple(requested_wh) != (fw, fh):
+        notes.append(f"frames are {fw}x{fh} but the settings request {requested_wh[0]}x{requested_wh[1]}: "
+                     "the camera keeps its own size when it rejects the requested one (see camera.readback)")
+    if calibration_wh is not None and tuple(calibration_wh) != (fw, fh):
+        notes.append(f"frames are {fw}x{fh} but the calibration is {calibration_wh[0]}x{calibration_wh[1]}: "
+                     "the runtime would rescale the intrinsics to the frame size")
+    if summary.get("frame_size_changes"):
+        notes.append(f"the frame size changed {summary['frame_size_changes']} times during the recording")
+    g = summary.get("gray_levels")
+    if g:
+        if g["saturated_pct_max"] > SATURATED_PCT:
+            notes.append(f"saturated frames: up to {g['saturated_pct_max']:.1f}% of pixels at 255")
+        if g["p99"] < DARK_P99:
+            notes.append(f"very dark frames: 99% of pixels at or below gray level {g['p99']:.0f}/255 (median of samples)")
+    return notes
 
 
 def _preview_loop(recorder: Recorder, producer: Any, name: str, worker: threading.Thread, max_width: int = 960) -> None:
@@ -378,6 +510,15 @@ def main() -> int:
         return 2
 
     camera = runtime_camera_settings()
+    calibration_wh: Optional[tuple[int, int]] = None
+    try:
+        camera["calibration_summary"] = calibration_summary(Path(camera["calibration"]))
+        calibration_wh = (camera["calibration_summary"]["image_width"], camera["calibration_summary"]["image_height"])
+    except Exception as exc:  # noqa: BLE001
+        camera["calibration_summary"] = {"error": repr(exc)}
+    requested_wh = None
+    if "width" in camera["ids_peak"] and "height" in camera["ids_peak"]:
+        requested_wh = (int(camera["ids_peak"]["width"]), int(camera["ids_peak"]["height"]))
     if args.fake:
         w, h = int(camera["ids_peak"].get("width", 2592)), int(camera["ids_peak"].get("height", 1944))
         producer: Any = FakeProducer(w, h, fps=args.fake_fps)
@@ -389,7 +530,7 @@ def main() -> int:
     recorder = Recorder(producer, seq_dir, jpeg_quality=args.jpeg_quality, png=args.png, writers=args.writers,
                         queue_size=args.queue_size, duration_s=args.duration, max_frames=args.max_frames)
     print(f"recording {'SYNTHETIC frames' if args.fake else 'IDS camera'} -> {seq_dir}")
-    print(f"  {camera['ids_peak'].get('width')}x{camera['ids_peak'].get('height')} {camera['ids_peak'].get('pixel_format')}, "
+    print(f"  requested {camera['ids_peak'].get('width')}x{camera['ids_peak'].get('height')} {camera['ids_peak'].get('pixel_format')}, "
           f"exposure {camera['ids_peak'].get('exposure_time_us')} us, target {camera['ids_peak'].get('frame_rate_target_hz')} Hz; "
           f"{free_gb:.0f} GB free")
     producer.start()
@@ -410,7 +551,13 @@ def main() -> int:
     finally:
         producer.stop()
 
+    if not args.fake:
+        try:
+            camera["readback"] = read_ids_camera_state(int(camera["ids_peak"].get("device_index", 0)))
+        except Exception as exc:  # noqa: BLE001
+            camera["readback"] = {"error": repr(exc)}
     summary = recorder.summary()
+    checks = consistency_checks(summary, requested_wh, calibration_wh)
     meta = {
         "tool_version": TOOL_VERSION,
         "name": args.name, "block": args.block, "notes": args.notes, "distance_m": args.distance_m,
@@ -418,7 +565,7 @@ def main() -> int:
         "started_at": started.isoformat(timespec="seconds"), "ended_at": datetime.now().isoformat(timespec="seconds"),
         "format": "png" if args.png else f"jpeg q{args.jpeg_quality}", "frames_dir": "frames",
         "camera": camera, "producer_stats": producer.stats() if hasattr(producer, "stats") else None,
-        "git_commit": git_commit(REPO), "statistics": summary,
+        "git_commit": git_commit(REPO), "statistics": summary, "checks": checks,
     }
     (seq_dir / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
 
@@ -427,8 +574,22 @@ def main() -> int:
           f"{summary['mean_frame_mb']} MB/frame")
     print(f"lost: capture {summary['dropped_capture']}, writer queue {summary['dropped_writer']}, write errors "
           f"{summary['write_errors']}, timestamp gaps {summary['timestamp_gaps']}")
+    g = summary.get("gray_levels")
+    if summary.get("frame_width") is not None:
+        print(f"frames {summary['frame_width']}x{summary['frame_height']}"
+              + (f"; gray levels: mean {g['mean']:.0f}, p1 {g['p1']:.0f}, p99 {g['p99']:.0f}, "
+                 f"saturated up to {g['saturated_pct_max']:.2f}%" if g else ""))
+    rb = camera.get("readback")
+    if isinstance(rb, dict) and "error" not in rb:
+        print(f"camera: {rb.get('DeviceModelName')} ({rb.get('SensorName')}), ROI {rb.get('Width')}x{rb.get('Height')} "
+              f"at ({rb.get('OffsetX')}, {rb.get('OffsetY')}), exposure {rb.get('ExposureTime', float('nan')):.0f} us, "
+              f"gain {rb.get('Gain')}, max frame rate {rb.get('AcquisitionFrameRate_max', float('nan')):.2f} Hz")
+    elif isinstance(rb, dict):
+        print(f"camera readback failed: {rb['error']}")
     if lost:
         print("WARNING: frames were lost; see meta.json and RECORDING_PROTOCOL.md (troubleshooting)")
+    for note in checks:
+        print(f"NOTE: {note}")
     print(f"meta: {seq_dir / 'meta.json'}")
     return 0
 

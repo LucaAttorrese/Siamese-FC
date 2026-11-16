@@ -16,24 +16,25 @@ Durata delle riprese: circa **35–40 minuti**. La sessione completa, compresa l
 
 ## Vincolo da tenere presente: l'inquadratura è stretta
 
-Con il teleobiettivo, **a 21 m la camera vede solo circa 2,0–2,6 m di larghezza** (circa
-1,5–2 m di altezza). Durante le riprese la camera è ferma, perché i motori non vengono
+Con il teleobiettivo, **a 21 m la camera vede solo circa 1,8–2,0 m di larghezza** (circa
+1,3–1,5 m di altezza). Durante le riprese la camera è ferma, perché i motori non vengono
 comandati, quindi il drone deve muoversi dentro questa finestra.
 
 - Prima di iniziare, segnare in sala i limiti dell'inquadratura a 21 m (nastro, coni, riferimenti sulle pareti), guardando l'anteprima sul portatile.
 - Durante gli spezzoni, l'operatore guida il pilota a voce guardando l'anteprima.
-- A 21 m il drone appare grande: circa 130 px di lato visto di fianco e fino a circa 340 px visto da sotto o di fronte, su 2592 px di larghezza.
+- A 21 m il drone appare grande: circa 130–145 px di lato visto di fianco e fino a circa 265–305 px visto da sotto o di fronte, su 2040 px di larghezza.
 
 ## Prima della sessione
 
 **Portatile** (il PC di training ed esercizio, con la camera IDS collegata):
 - [ ] SDK IDS peak installato, con i binding Python (`ids_peak` 1.17.0, `ids_peak_ipl` 1.18.0) nella venv di `cuasp_siamfc`. Sul portatile di training sono già installati (2026-11-11); su un altro PC vedere il README, sezione 8.
-- [ ] Spazio libero su disco: **almeno 200 GB**. Le riprese occupano circa 100–180 GB.
+- [ ] Spazio libero su disco: **almeno 100 GB**. Le riprese occupano circa 45–75 GB: nelle prove del 2026-11-16 un frame occupava 0,3–0,5 MB, a 62,6 fps.
 - [ ] Portatile collegato alla corrente, in modalità prestazioni, sospensione disattivata, altri programmi chiusi.
 - [ ] **Non avviare `cuasp.py`.** Il registratore non comanda i motori. In `settings.py` i comandi motore restano disabilitati (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`).
 
 **Camera** (le stesse impostazioni del funzionamento reale):
-- [ ] Impostazioni lette da `cuasp_siamfc/control/suncubes/settings.py`, da non cambiare per le riprese: 2592x1944, Mono8, esposizione 20 ms, guadagno e frequenza come configurati. Il registratore le riporta in ogni `meta.json`.
+- [ ] Impostazioni lette da `cuasp_siamfc/control/suncubes/settings.py`, da non cambiare durante le riprese. Fissate il 2026-11-16: 2040x1536 Mono8, esposizione 15 ms, guadagno 0 dB, banda della camera 300 MB/s, quindi circa 62,6 fps. Il registratore riporta in ogni `meta.json` sia le impostazioni richieste sia quelle rilette dalla camera.
+- [ ] Non cambiare impostazioni con IDS peak Cockpit (ROI, banda, salvataggio degli UserSet). La calibrazione vale solo con la configurazione che la camera carica all'accensione.
 - [ ] **Messa a fuoco e zoom dell'obiettivo fissi**, come per l'uso reale. Non toccarli: la calibrazione non sarebbe più valida.
 
 **Materiale:**
@@ -52,9 +53,12 @@ Nella prova con la camera, controllare anche che l'**anteprima sia un'immagine n
 in scala di grigi: niente strisce, immagine ripetuta o rumore uniforme. Se non lo è, il
 formato pixel della camera non è Mono8: fermarsi e segnalarlo.
 
-Alla fine di ogni registrazione il programma stampa due righe da controllare:
-- `saved N frames ... measured XX fps`: annotare gli fps misurati. Con un'esposizione di 20 ms è normale che siano circa 50 invece di 70. È un dato che ci serve, non un errore.
+Alla fine di ogni registrazione il programma stampa alcune righe da controllare:
+- `saved N frames ... measured XX fps`: annotare gli fps misurati. Con le impostazioni del 2026-11-16 sono circa 62,6, non 70: è atteso.
 - `lost: capture 0, writer queue 0, write errors 0`: deve essere tutto **0**. Altrimenti vedere "Problemi" in fondo.
+- `frames 2040x1536; gray levels: mean .., p1 .., p99 ..`: luminosità dell'immagine su 255. Nella prova in sala, con le luci di esercizio, annotarla.
+- `camera: ...`: modello, ROI ed esposizione riletti dalla camera. Deve dire `ROI 2040x1536 at (8, 8), exposure 14999 us` e `max frame rate 62.61 Hz`.
+- Righe `NOTE: ...`: incongruenze da annotare nel registro. Con le impostazioni attuali non dovrebbe comparirne nessuna. Le note "very dark" o "saturated" in sala vanno segnalate prima di proseguire.
 
 ## Come registrare uno spezzone
 
@@ -140,7 +144,10 @@ velocemente, fino a perdere e ritrovare il drone.
 | `lost: capture N` diverso da 0 | Il programma non ha preso tutti i frame. Chiudere gli altri programmi; rilanciare con `--no-preview`; ripetere lo spezzone. |
 | `writer queue N` diverso da 0 | Disco o CPU non tengono il ritmo. Chiudere gli altri programmi, lasciare il portatile alla corrente, provare `--writers 6`; ripetere lo spezzone. |
 | `timestamp gaps` diverso da 0 | Frame persi prima di arrivare al PC (cavo, USB, carico). Annotarlo; se ricorre, controllare il collegamento della camera. |
-| fps misurati circa 50 invece di 70 | Atteso con un'esposizione di 20 ms. Annotarlo e proseguire. |
+| fps misurati circa 62,6 invece di 70 | Atteso: è il massimo della camera con 15 ms di esposizione. Annotarlo e proseguire. |
+| fps misurati circa 43 | Il limite di banda non è stato applicato. Fermarsi e segnalarlo: le riprese devono essere a 62,6 fps. |
+| `IDS capture start failed: ...` con `gain` o `link throughput` nel messaggio | Un'impostazione della camera non è valida per questa camera. Non avviare le riprese: segnalarlo. |
+| `NOTE: very dark frames` o `saturated frames` | Immagine troppo scura o bruciata con le luci di esercizio. Non cambiare le impostazioni in autonomia: segnalarlo e decidere insieme prima di proseguire. |
 | `No IDS camera detected` | Camera non collegata o non riconosciuta: ricollegarla e verificare con IDS peak Cockpit, poi **chiudere il Cockpit** prima di registrare (la camera si apre in modo esclusivo). |
 | `OpenBLAS error: Memory allocation ... failed`, o errori di memoria all'avvio | La memoria virtuale di Windows è esaurita, spesso per Esplora risorse rimasto aperto per giorni. Gestione attività → "Esplora risorse" → **Riavvia**, oppure riavviare il PC. |
 | Spazio su disco quasi esaurito | Il programma rifiuta di partire sotto i 20 GB liberi. Liberare spazio prima di continuare. |
@@ -149,7 +156,7 @@ velocemente, fino a perdere e ritrovare il drone.
 
 Data: ______  Luogo: ______  Operatore: ______  Pilota: ______  Drone: ______
 
-Configurazione luci: ______  fps misurati nella prova camera: ______
+Configurazione luci: ______  fps misurati nella prova camera: ______  Livelli di grigio (mean / p99): ______
 
 | Spezzone (`--name`) | Ora | Distanza (m) | Frame salvati | Perse (capture / writer / gaps) | Note |
 |---|---|---|---|---|---|

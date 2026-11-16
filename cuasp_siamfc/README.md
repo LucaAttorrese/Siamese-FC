@@ -25,8 +25,8 @@ integration changes are made on these copies.
 ## Behaviour changes with respect to C-UASP
 
 Besides adding the SiamFC tracker, this copy of the C-UASP runtime behaves differently
-from the original in two respects (full list of local changes, with the reasons, in
-[PROVENANCE.md](PROVENANCE.md), "Local changes to the copied files"):
+from the original in the following respects (full list of local changes, with the
+reasons, in [PROVENANCE.md](PROVENANCE.md), "Local changes to the copied files"):
 
 1. **Stop on target loss is sequenced by the motor dispatcher worker**
    (`control/cuasp.py`, `MotorCommandDispatcher`). In C-UASP the stop was a separate
@@ -37,6 +37,16 @@ from the original in two respects (full list of local changes, with the reasons,
    present in C-UASP itself.
 2. **Motor commands are disabled by default** (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` in
    `control/suncubes/settings.py`; 1 in C-UASP).
+3. **The camera gain is set in explicit units** (`camera.py`, `_set_gain_db()`).
+   `CV_IDS_GAIN_DB` is converted to the linear factor the camera expects. A gain the camera
+   cannot apply makes the camera start fail instead of being silently ignored. In C-UASP
+   the dB value was written as a factor.
+4. **The camera link bandwidth limit is set by the runtime**
+   (`CV_IDS_LINK_THROUGHPUT_LIMIT_BPS` = 300 MB/s). It is applied with unit and range
+   checks; an invalid value fails the start.
+5. **Camera settings match the camera in use** (U3-33DxXCP-M, measured on 2026-11-16):
+   2040x1536 instead of 2592x1944 (which the camera silently rejected), and a 15 ms
+   exposure instead of 20 ms. Result: 62.6 fps instead of 43.2 fps.
 
 ## Using this repository on the training PC
 
@@ -257,14 +267,46 @@ another machine). The fixed range for the parallax correction is
   (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`, decision of 2026-11-10; it is 1 in C-UASP), as
   required by the C-UASP safety rules. Enable them only deliberately, for the motors-on
   bench test (V8);
-- known open point, inherited from C-UASP: the calibration YAMLs are computed at
-  2040x1536, while `settings.py` acquires 2592x1944 and `camera.py` rescales the
-  intrinsics (fx ≈ 21060 → ≈ 26760 px). The comment in the YAML itself says the real
-  acquisition resolution is unclear. This affects every pixel-to-angle conversion and
-  must be resolved before the angular validation (V7);
-- `settings.py` sets an exposure of 20 ms (`CV_IDS_EXPOSURE_TIME_US = 20000`) with a
-  70 Hz frame-rate target. A 20 ms exposure caps the camera at about 50 fps; check the
-  real frame rate on the bench.
+- **first camera test (2026-11-16)**: the camera is an IDS **U3-33DxXCP-M** (Sony
+  **IMX900**, global shutter, 2064x1552 sensor, 2.25 µm pixels, firmware 3.80.26143). It
+  boots from `UserSet1` with a **2040x1536 ROI at offset (8, 8)**. It could not deliver
+  the 2592x1944 that C-UASP's `settings.py` requested (larger than the sensor):
+  `_try_set_node` swallowed the rejection and the camera kept its ROI. `settings.py` now
+  requests 2040x1536. That is the calibration size, so the runtime's
+  `_scale_intrinsics_to_runtime` (which uses the real frame size) applies a factor of 1,
+  and the 27 % focal ambiguity inherited from C-UASP does not occur with this camera.
+  Notes on the calibration:
+  - the user chose (2026-11-16) to keep `calibration_legacy_20260921_x_test.yaml`
+    (fx 24119 px, cx 1140), the override already used by `cuasp.py`, over the more recent
+    `calibration.yaml` (fx 21062 px, cx 697), accepting the inconsistencies;
+  - with 2.25 µm pixels these fx values correspond to a 47–54 mm focal length, while both
+    YAMLs name an "Edmund_Optics_16mm_UC" lens (fx ≈ 7100 px);
+  - the calibration is only valid for the ROI it was computed with (2040x1536 at (8, 8),
+    stored in `UserSet1`). The runtime does not set the offsets: do not change the ROI
+    or save user sets with IDS peak Cockpit;
+- **frame rate**: 43.2 fps at first (zero losses). The limit was not the exposure but the
+  camera's `DeviceLinkThroughputLimit` (162 MB/s from `UserSet1`, link speed 500 MB/s).
+  The runtime now sets it (`CV_IDS_LINK_THROUGHPUT_LIMIT_BPS` = 300 MB/s), and with the
+  15 ms exposure chosen on 2026-11-16 the camera runs at **62.6 fps** (verified: 0 frames
+  lost, 16.0 ms per frame). Maximum frame rate reported by the camera at this ROI:
+
+  | Exposure | 162 MB/s | 300 MB/s |
+  |---|---|---|
+  | 20 ms | 43.2 fps | 47.7 fps |
+  | 15 ms | 43.2 fps | 62.6 fps |
+  | ≤ 12 ms | 43.2 fps | 67.9 fps |
+
+  70 Hz is out of reach at 2040x1536. The supervisor loop (`CV_CUAS_LOOP_HZ` = 70) only
+  submits motor commands on new frames (`_is_new_visual_sample`), so a slower camera is
+  safe;
+- **gain units**: on this camera `Gain` is a linear factor (1.0–15.85, i.e. 0–24 dB).
+  `CV_IDS_GAIN_DB` is now converted explicitly (behaviour change 3 above). +2.5 dB
+  restores the brightness of the old 20 ms exposure;
+- `tools/record_ids.py` (v2) records what the camera really did:
+  - the actual frame size and sampled gray levels;
+  - a read-only readback of the camera nodes after the recording (`camera.readback`);
+  - `checks`: mismatches against the requested size and the calibration, saturated or
+    very dark frames.
 
 ```powershell
 cd control

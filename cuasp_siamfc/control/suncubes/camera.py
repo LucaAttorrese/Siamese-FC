@@ -509,6 +509,11 @@ class _IdsLatestFrameProducer:
                 lambda n: n.SetCurrentEntry(str(self._cfg.get("acquisition_mode", "Continuous"))),
             )
 
+            # cuasp_siamfc: before the frame-rate target, whose reachable maximum depends on it.
+            throughput_bps = _float_or_none(self._cfg.get("link_throughput_limit_bps"))
+            if throughput_bps is not None and throughput_bps > 0.0:
+                _set_link_throughput_limit_bps(nodemap, throughput_bps)
+
             target_hz = _float_or_none(self._cfg.get("frame_rate_target_hz"))
             settings_hz = _ids_frame_rate_target_hz_from_settings()
             if settings_hz is not None:
@@ -532,7 +537,8 @@ class _IdsLatestFrameProducer:
             if exposure_us is not None and exposure_us > 0.0:
                 _set_exposure_time_us(nodemap, exposure_us)
             if "gain_db" in self._cfg:
-                _try_set_node(nodemap, "Gain", lambda n: n.SetValue(float(self._cfg["gain_db"])))
+                # cuasp_siamfc: explicit dB -> factor conversion, errors not swallowed (see _set_gain_db).
+                _set_gain_db(nodemap, float(self._cfg["gain_db"]))
 
             payload_size = int(nodemap.FindNode("PayloadSize").Value())
             min_required = int(datastream.NumBuffersAnnouncedMinRequired())
@@ -3343,6 +3349,72 @@ def _set_exposure_time_us(nodemap, target_us: float) -> bool:
         return True
     except Exception:
         return False
+
+
+def _node_unit(node) -> str:
+    try:
+        return str(node.Unit() or "").strip()
+    except Exception:
+        return ""
+
+
+def _set_gain_db(nodemap, gain_db: float) -> float:
+    """cuasp_siamfc (2026-11-16): sets the camera gain from a value in dB, explicitly.
+
+    GenICam ``Gain`` is in dB on some cameras and a linear factor on others: on the
+    U3-33DxXCP-M it has no unit and a 1.0-15.85 range (0-24 dB). In C-UASP the dB setting
+    was written into the node unchanged, so 0 dB was rejected (below 1.0) and silently
+    ignored, and e.g. 6 dB would have become a factor of 6 (15.6 dB). Here the value is
+    converted to a factor (10**(dB/20)) unless the node declares the unit "dB". A missing
+    node is accepted only for 0 dB; an out-of-range value or a rejected write raises, so
+    the camera start fails instead of running with a different gain. Returns the value
+    written to the node.
+    """
+    gain_db = float(gain_db)
+    if not math.isfinite(gain_db):
+        raise ValueError(f"gain must be finite, got {gain_db!r} dB")
+    node = _find_first_node(nodemap, ("Gain",))
+    if node is None:
+        if gain_db == 0.0:
+            return 1.0
+        raise RuntimeError(f"camera has no Gain node; cannot apply {gain_db} dB")
+    in_db = _node_unit(node).lower() == "db"
+    value = gain_db if in_db else 10.0 ** (gain_db / 20.0)
+    lo, hi = float(node.Minimum()), float(node.Maximum())
+    tol = 1e-6 * max(1.0, abs(value))
+    if not (lo - tol <= value <= hi + tol):
+        unit = "dB" if in_db else "x (linear factor)"
+        raise ValueError(f"gain {gain_db} dB -> {value:.4g} {unit} is outside the camera range [{lo:.4g}, {hi:.4g}]")
+    value = min(max(value, lo), hi)  # only absorbs the rounding tolerance above
+    node.SetValue(value)
+    return value
+
+
+def _set_link_throughput_limit_bps(nodemap, limit_bps: float) -> float:
+    """cuasp_siamfc (2026-11-16): sets GenICam ``DeviceLinkThroughputLimit`` (bytes/s).
+
+    The camera keeps its own value otherwise (162 MB/s from UserSet1 on the training rig,
+    which capped the frame rate at 43.2 fps). The node unit must be bytes/s ("Bps", the
+    GenICam SFNC unit, or no unit): no conversion is guessed. Out of range or rejected ->
+    raises. Returns the value written."""
+    node = _find_first_node(nodemap, ("DeviceLinkThroughputLimit",))
+    if node is None:
+        raise RuntimeError("camera has no DeviceLinkThroughputLimit node")
+    unit = _node_unit(node)
+    if unit not in ("", "Bps", "B/s"):
+        raise ValueError(f"DeviceLinkThroughputLimit unit is {unit!r}, expected bytes/s ('Bps')")
+    value = int(round(float(limit_bps)))
+    lo, hi = int(node.Minimum()), int(node.Maximum())
+    if not lo <= value <= hi:
+        raise ValueError(f"link throughput limit {value} B/s is outside the camera range [{lo}, {hi}]")
+    try:
+        inc = int(node.Increment())
+    except Exception:
+        inc = 1
+    if inc > 1 and (value - lo) % inc != 0:
+        raise ValueError(f"link throughput limit {value} B/s is not a multiple of the camera step {inc} B/s")
+    node.SetValue(value)
+    return float(value)
 
 
 def _set_acquisition_frame_rate_target_hz(nodemap, target_hz: float) -> bool:
