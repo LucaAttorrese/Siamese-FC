@@ -282,6 +282,39 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
 - **P4 — Confidenza `sigmoid(picco)`**: la rete è addestrata con loss logistica e lo score dopo `fin_adjust_bn` ne è l'ingresso, quindi `sigmoid(picco)` più APCE è una misura più fondata del rapporto con il picco iniziale, che deriva con l'aggiornamento del template.
 - Nota: il template update va lasciato attivo. La Fig. 4 del paper mostra che aiuta sempre; `zLR = 0` è solo un dato di latenza.
 
+## Proposta P5 — Normalizzazione della luminosità prima del detector (2026-11-17), da valutare in seguito
+
+Non approvata: decisione dell'utente rimandata. Per ora il rimedio è il guadagno della camera a +6 dB (`CV_IDS_GAIN_DB`, 2026-11-17). Le registrazioni restano valide in ogni caso, perché la normalizzazione si applica a valle e si valuta offline su qualsiasi registrazione.
+
+**Motivazione** (punto 4b, blocco B): a 0 dB, con cielo nuvoloso, il detector perde il drone scuro davanti a sfondi scuri. Il guadagno fisso funziona con questa luce, ma con il sole schiarirebbe molto la scena. La normalizzazione invece si adatta alla luce.
+
+**Progetto:**
+- Dove: solo sull'immagine che va al detector, nel thread del detector (`UltralyticsDroneDetector.detect()`).
+  - SiamFC continua a ricevere il frame originale: una luminosità che cambia durante il tracking non corrisponderebbe più al template preso all'aggancio.
+  - Geometria, freschezza, clamp e stop su perdita restano invariati.
+- Cosa: guadagno digitale globale per frame, applicato con una tabella di 256 valori (`cv2.LUT`, circa 1 ms su 2040x1536).
+  - g = minimo fra: livello obiettivo / media (obiettivo: la luminosità tipica del dataset di training, da misurare); 250 / p99,5, per non saturare; un massimo fisso, ad esempio ×4.
+  - Statistiche calcolate su una griglia sottocampionata.
+  - **g ≥ 1**: l'immagine non viene mai scurita, quindi con scena chiara il comportamento resta quello attuale.
+- Senza memoria tra frame, quindi il replay è riproducibile.
+- Nuove impostazioni `CV_DETECTOR_NORMALIZE` (spenta di default finché non è validata), `CV_DETECTOR_NORM_TARGET`, `CV_DETECTOR_NORM_MAX_GAIN`, con controlli in `validate()`.
+- Guadagno applicato registrato nel debug e nei CSV del replay; test unitari; documentazione in `PROVENANCE.md` e README.
+- Limite: il guadagno globale aiuta poco se il frame è quasi tutto chiaro con una zona molto scura dietro il drone. Variante locale (CLAHE) solo come seconda opzione: altera l'immagine in modi non visti in training e amplifica il rumore.
+- Si può combinare con un guadagno della camera moderato, e con un nuovo training del detector che includa frame IDS etichettati (soluzione di fondo al divario di dominio).
+
+**Validazione** (quasi tutta offline, con un'opzione di `replay_siamfc_source.py`):
+1. Scena vuota, tutti i 12 spezzoni del blocco A. Requisito: come oggi, zero agganci e zero frame affidabili. Caso critico: A10 a luci spente (riceve il guadagno più alto).
+2. Blocco B a 0 dB, tutti gli spezzoni:
+   - gli sfondi scuri (B2 r2/r4, B3 r2, B6 r2–r4) devono avvicinarsi ai risultati a +6 dB;
+   - gli spezzoni già buoni (B1, B2 r1/r3, B6 r1, B7) non devono peggiorare;
+   - controllo visivo dei casi dubbi, per escludere falsi bersagli.
+3. Spezzoni a +6 dB con la normalizzazione: guadagno digitale vicino a 1, nessun effetto negativo.
+4. Non regressione sui video DUT con le annotazioni (`--gt`): i bersagli sbagliati non devono aumentare e la copertura non deve calare.
+5. Latenza (come in V5): `read_candidate` invariato; detector circa +1–2 ms.
+6. Dal vivo in V7, al banco con motori spenti, con il guadagno applicato visibile nel debug.
+
+Per numeri solidi nei tratti senza tracking servono etichette su un campione di frame, pre-generate e corrette dall'utente (già previste per V4). Stima: 1–2 ore di implementazione e test, 1–1,5 ore di calcolo in background.
+
 ## Ordine di esecuzione (sul PC di training, RTX 5060 Laptop)
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
@@ -355,6 +388,40 @@ L'utente ha approvato solo V4b. Le seguenti restano proposte: chiedere prima di 
      - normalizzazione della luminosità prima del detector (cambiamento del codice);
      - frame IDS etichettati nel training del detector (Fase 2, punto 4);
      - in taratura, `acquire_min_score` più basso insieme a una dimensione minima dei box.
-   - B3–B7 rimandati alla mattina del 2026-11-17, con la luce del giorno (condizione d'uso). Consigliato anche un B2 diurno davanti alla porta e alla fascia scura, da confrontare con r2 e r4.
+   - B3–B7 rimandati alla mattina del 2026-11-17, con la luce del giorno.
+
+   **Blocco B, B3–B7** (2026-11-17, 09:26–10:36, cielo nuvoloso, luci della sala al massimo):
+   - La luce è quasi quella di ieri sera: livello medio 24–44 a 0 dB. È una **condizione d'uso reale**, non un caso limite.
+   - Tutte le registrazioni sono valide: 62,61 fps, 0 perdite. Risultati in `runs/v4_blockB/`.
+   - L'utente ha incluso apposta gli sfondi difficili (porta, cambi di colore) anche in B3–B5.
+
+   | Spezzone | Situazione | Tracking dopo il 1° aggancio |
+   |---|---|---|
+   | B3 r1 / r2 / r3 | rapidi (fino a circa 2 m/s), r2 con porta | 89 / 57 / 94 % |
+   | B4 r1 / r2 | uscite e rientri, fuori qualche secondo | 56 / 50 % (perdite quasi tutte ai bordi, come previsto) |
+   | B5 r1 / r2 | rotazioni | 81 / 92 % (perdite brevi, riaggancio in 0,3–1,5 s) |
+   | B6 r1 | sfondo alternato grigio e bianco | 98 % |
+   | B6 r2 | porta | 34 % (riagganci fino a 17 s) |
+   | B6 r3 | alternato con simbolo dell'estintore | 69 % |
+   | B6 r4 | angolo molto scuro | 41 % (riagganci fino a 21 s) |
+   | B7 18,9 / 21,2 / 23,4 m | stazionario | 100 / 100 / 100 % |
+
+   - **Guadagno +6 dB** (decisione dell'utente: 3 spezzoni B6 sugli stessi sfondi, poi guadagno riportato a 0 per B7):
+     - livello medio 44–55, nessuna saturazione, fattore riletto 1,995;
+     - stesso sfondo, 0 dB → +6 dB: angolo scuro 41 → **97 %**; alternato con estintore 69 → **93 %**; porta 34 → **87 %**;
+     - i voli non sono identici, ma l'effetto è grande e coerente con la prova digitale di ieri.
+     - **Il guadagno +6 dB risolve gran parte delle perdite su sfondo scuro con questa luce.**
+   - Controllo visivo dei casi con box del detector lontano dal tracker (60–135 px) in B3, B4, B5, B6: **entrambi i box sono sempre sul drone, nessun falso bersaglio.** Cause:
+     - il tracker in ritardo su un drone veloce e mosso;
+     - un artefatto della misura: il box del detector arriva qualche frame dopo il frame su cui è calcolato;
+     - il box allungato sul braccio durante le rotazioni;
+     - davanti alla porta, a 0 dB, il box del tracker si allarga fino a 592 × 173 px restando centrato sul drone. Poi la verifica lo scarta per dimensione e il tracker va in perdita.
+   - B7: box del detector 330, 280 e 251 px a 18,9, 21,2 e 23,4 m (larghezza × distanza costante entro il 6 %). Score 0,70–0,80 a 18,9 m, 0,50–0,73 a 23,4 m (93 su 98 ≥ 0,5): cala con la distanza. I 25 m non sono stati registrati.
+     - In `meta.json` dello spezzone `20261117_103356_B7_distanze_23_m` la distanza è 21,2 per errore: quella vera è **23,4 m** (nelle note).
+
+   **Scena vuota a +6 dB** (2026-11-17, A20–A23, 4 spezzoni da 60 s: parete alternata, porta, estintore, zona scura). Servono a verificare i falsi allarmi con il nuovo guadagno.
+   - Livello medio 41–68, guadagno riletto 1,995, 0 perdite.
+   - **Nessun aggancio e nessun frame affidabile**, come a 0 dB.
+   - Box grezzi del detector: zero in 3 spezzoni su 4. In A20 ci sono 11 box deboli (score mediano 0,18, massimo 0,26) sempre nello stesso punto, al bordo inferiore del frame (circa 885, 1490). Sono piccoli, 38–61 × 29–35 px, come le macchie di A10. Risultati in `runs/v4_blockA/`.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

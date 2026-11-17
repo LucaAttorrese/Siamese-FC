@@ -46,7 +46,9 @@ reasons, in [PROVENANCE.md](PROVENANCE.md), "Local changes to the copied files")
    checks; an invalid value fails the start.
 5. **Camera settings match the camera in use** (U3-33DxXCP-M, measured on 2026-11-16):
    2040x1536 instead of 2592x1944 (which the camera silently rejected), and a 15 ms
-   exposure instead of 20 ms. Result: 62.6 fps instead of 43.2 fps.
+   exposure instead of 20 ms. Result: 62.6 fps instead of 43.2 fps. Gain +6 dB since
+   2026-11-17: at 0 dB the indoor frames on an overcast day were too dark for the detector
+   in front of dark backgrounds.
 
 ## Using this repository on the training PC
 
@@ -301,7 +303,10 @@ another machine). The fixed range for the parallax correction is
   safe;
 - **gain units**: on this camera `Gain` is a linear factor (1.0–15.85, i.e. 0–24 dB).
   `CV_IDS_GAIN_DB` is now converted explicitly (behaviour change 3 above). +2.5 dB
-  restores the brightness of the old 20 ms exposure;
+  restores the brightness of the old 20 ms exposure. The setting is +6 dB since 2026-11-17
+  (factor 1.995). With 0 dB the detector lost the drone in front of the door and dark
+  corners of the room: 34-69 % tracking against 87-97 % at +6 dB, recordings B6 in
+  `PLAN.md`;
 - `tools/record_ids.py` (v2) records what the camera really did:
   - the actual frame size and sampled gray levels;
   - a read-only readback of the camera nodes after the recording (`camera.readback`);

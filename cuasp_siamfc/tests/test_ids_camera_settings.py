@@ -152,7 +152,7 @@ def test_settings_match_the_camera_in_use():
     assert (settings.CV_IDS_WIDTH, settings.CV_IDS_HEIGHT) == (2040, 1536)
     assert settings.CV_IDS_EXPOSURE_TIME_US == 15000.0
     assert settings.CV_IDS_LINK_THROUGHPUT_LIMIT_BPS == 300_000_000
-    assert settings.CV_IDS_GAIN_DB == 0.0
+    assert settings.CV_IDS_GAIN_DB == 6.0  # user decision 2026-11-17 (was 0.0)
     settings.validate()  # raises ValueError on malformed settings
 
 
@@ -166,7 +166,7 @@ def test_settings_validation_rejects_negative_gain_and_throughput(monkeypatch, n
 def test_cuasp_forwards_the_ids_settings(cuasp_module):
     ids = cuasp_module._build_camera_config().ids_opencv["ids_peak"]
     assert (ids["width"], ids["height"]) == (2040, 1536)
-    assert ids["exposure_time_us"] == 15000.0 and ids["gain_db"] == 0.0
+    assert ids["exposure_time_us"] == 15000.0 and ids["gain_db"] == 6.0
     assert ids["link_throughput_limit_bps"] == 300_000_000
     assert str(cuasp_module.CALIBRATION_YAML).endswith("calibration_legacy_20260921_x_test.yaml")  # user decision
 
@@ -237,7 +237,7 @@ def test_producer_writes_the_configured_camera_settings(monkeypatch, cuasp_modul
     assert written["Width"] == 2040 and written["Height"] == 1536
     assert written["DeviceLinkThroughputLimit"] == 300_000_000
     assert written["ExposureTime"] == 15000.0
-    assert written["Gain"] == 1.0  # 0 dB -> factor 1.0, accepted by the camera
+    assert written["Gain"] == pytest.approx(10 ** 0.3)  # 6 dB -> factor 1.995 (camera readback 2026-11-17)
     names = [n for n, _ in log]
     assert names.index("DeviceLinkThroughputLimit") < names.index("AcquisitionFrameRateTarget") < names.index("StartAcquisition")
 

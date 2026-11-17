@@ -91,8 +91,8 @@ These alter how the copied runtime behaves, not only what it is configured to do
    - Here: the dB value is converted to a factor (`10**(dB/20)`) unless the node declares the
      unit "dB". It is checked against the node range: out of range or rejected -> exception,
      the camera start fails (`IDS capture start failed: ...`). `validate()` rejects a
-     negative `CV_IDS_GAIN_DB`. With the current 0 dB the camera receives 1.0, the value it
-     already had, so the images are unchanged.
+     negative `CV_IDS_GAIN_DB`. With 0 dB the camera receives 1.0, the value it already had,
+     so the images were unchanged. Since 2026-11-17 the setting is 6 dB (change 5).
 
 4. **Camera link bandwidth limit set by the runtime** (`control/suncubes/camera.py`,
    `_set_link_throughput_limit_bps()`; `control/cuasp.py`; `control/suncubes/settings.py`
@@ -113,6 +113,10 @@ These alter how the copied runtime behaves, not only what it is configured to do
      (16.0 ms per frame) instead of 43.2 fps; images are 25 % darker than at 20 ms.
    - Verified on the camera: `tools/record_ids.py` readback on 2026-11-16 (300 MB/s, 15 ms,
      gain 1.0, 2040x1536 at (8, 8), 62.61 fps, no frames lost).
+   - `CV_IDS_GAIN_DB` 0 -> **6** (2026-11-17, user decision). Indoors with an overcast sky the
+     15 ms frames were dark (mean gray 24-44). The detector lost the drone in front of dark
+     backgrounds (door, dark corner): 34-69 % tracking at 0 dB, 87-97 % at +6 dB on the same
+     backgrounds. Readback: gain factor 1.995, no saturation.
    - Calibration: `control/cuasp.py` keeps the C-UASP temporary override
      `calibration/calibration_legacy_20260921_x_test.yaml` (user decision of 2026-11-16,
      inconsistencies accepted); only a comment was added.

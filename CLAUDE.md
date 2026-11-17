@@ -13,7 +13,7 @@ Il piano dettagliato, con lo stato di ogni fase, è in [PLAN.md](PLAN.md). La pr
 - **Sicurezza** (sistema di puntamento fisico, regole di C-UASP): non indebolire limiti, clamp, controlli di freschezza del campione o stop su perdita; nessuna conversione di unità implicita. Le prove dal vivo partono con `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`.
 - **Motori disabilitati di default** (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` in `settings.py`, decisione del 2026-11-10). **Quando si arriva alla prova con motori abilitati (V8), ricordarlo all'utente prima di iniziare:** vanno abilitati esplicitamente e solo per quella prova.
 - Prima di comandi lunghi o costosi (training, download di GB, ricerche di iperparametri) indicare durata e spazio previsti. I processi lunghi vanno in background, con un controllo che si fermi anche in caso di errore.
-- Le proposte P1–P4 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle.
+- Le proposte P1–P5 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle.
 
 ## Cos'è questo progetto
 
@@ -130,8 +130,15 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
     - davanti alla fascia scura (r2) e alla porta scura (r4) 81 % e 40 %. Il detector dà score bassi sul drone scuro su sfondo scuro, le verifiche falliscono e il riaggancio tarda 3–11 s;
     - nessun falso bersaglio;
     - schiarendo i frame ×2 il detector torna sopra 0,5 nel 66–100 % dei casi. Dettagli e rimedi (non applicati) in PLAN, punto 4b.
-  - **B3–B7 rimandati alla mattina del 2026-11-17**, con la luce del giorno (decisione dell'utente). Il guadagno resta a 0 dB; non è stato cambiato nulla nelle impostazioni.
-    - Consigliato rifare anche un B2 in luce diurna davanti alla porta e alla fascia scura in basso, per vedere se le perdite di stasera dipendono dal buio.
+  - **B3–B7 fatti il 2026-11-17 mattina.** Cielo nuvoloso e luci al massimo, livello medio 24–44: la scena scura è una condizione d'uso reale.
+    - Sfondi chiari: tracking 89–100 %. Porta o angolo scuro a 0 dB: 34–41 %.
+    - **3 spezzoni B6 a +6 dB** sugli stessi sfondi (`CV_IDS_GAIN_DB` portato a 6 con permesso, poi **riportato a 0.0**, file uguale al commit): 87–97 %. Il guadagno risolve gran parte del problema.
+    - Nessun falso bersaglio, verificato sulle immagini.
+    - B7 al 100 % a 18,9, 21,2 e 23,4 m. Il `meta.json` dello spezzone a 23 m riporta 21,2 per errore (la distanza vera è nelle note). Dettagli in PLAN, punto 4b.
+    - **Decisione dell'utente (2026-11-17): `CV_IDS_GAIN_DB = 6.0`** per i blocchi successivi e come impostazione attuale (luce d'uso prevista simile al 16–17 novembre). Aggiornati test, `PROVENANCE.md` (cambiamento 5) e README.
+    - La normalizzazione della luminosità prima del detector è salvata come **proposta P5** in PLAN, da valutare in seguito; non è approvata.
+    - **Scena vuota a +6 dB (A20–A23) fatta:** nessun aggancio. Box grezzi solo in A20: 11 deboli (≤ 0,26, 38–61 px) al bordo inferiore.
+  - **Prossimo: blocco C** (marker ArUco ID 1 e 2 sul drone, C1 stazionario e C2 lento, 2 volte ciascuno, a +6 dB), poi D (facoltativo).
     - Il guadagno si cambia solo da `CV_IDS_GAIN_DB` in `settings.py`: `record_ids.py` non ha un'opzione per il guadagno.
   - Analisi del blocco B: `tools/replay_siamfc_source.py <rec>/frames --calibration calibration\calibration_legacy_20260921_x_test.yaml --fps 62.6 --out ..\runs\v4_blockB\<nome>.csv` (da `cuasp_siamfc/`). Gli script di controllo (accordo tracker–detector, dettaglio delle perdite, provini con i box, prova del guadagno simulato) erano nella cartella temporanea della sessione: vanno riscritti se servono.
 

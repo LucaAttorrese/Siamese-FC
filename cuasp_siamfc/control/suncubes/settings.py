@@ -73,9 +73,13 @@ CV_IDS_EXPOSURE_TIME_US = 15000.0
 # cuasp_siamfc (2026-11-16): 20000.0 -> 15000.0 (user decision): with
 # CV_IDS_LINK_THROUGHPUT_LIMIT_BPS = 300 MB/s the camera allows 62.6 fps instead of 47.7 fps
 # at 20 ms, with less motion blur; images are 25 % darker than at 20 ms.
-CV_IDS_GAIN_DB = 0.0  # dB, >= 0. cuasp_siamfc: camera.py converts it to the camera's linear factor
+CV_IDS_GAIN_DB = 6.0  # dB, >= 0. cuasp_siamfc: camera.py converts it to the camera's linear factor
 # (10**(dB/20)) when the Gain node is a factor, as on the U3-33DxXCP-M (1.0-15.85, i.e. 0-24 dB);
 # out of range -> the camera start fails. In C-UASP the dB value was written as a factor.
+# cuasp_siamfc (2026-11-17): 0.0 -> 6.0 (user decision). Indoors with an overcast sky the
+# 15 ms frames were dark (mean gray 24-44) and the detector lost the drone in front of dark
+# backgrounds; at +6 dB the same backgrounds went from 34-69 % to 87-97 % tracking
+# (recordings B6, PLAN.md 4b). Expected operating light: like 2026-11-16/17.
 # Bandwidth limit of the camera link in bytes/s (GenICam DeviceLinkThroughputLimit, unit Bps);
 # 0 = keep the camera's own value. cuasp_siamfc (2026-11-16): the camera's UserSet1 value,
 # 162 MB/s, capped the frame rate at 43.2 fps whatever the exposure. Measured maxima at
