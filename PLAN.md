@@ -423,5 +423,24 @@ Per numeri solidi nei tratti senza tracking servono etichette su un campione di 
    - Livello medio 41–68, guadagno riletto 1,995, 0 perdite.
    - **Nessun aggancio e nessun frame affidabile**, come a 0 dB.
    - Box grezzi del detector: zero in 3 spezzoni su 4. In A20 ci sono 11 box deboli (score mediano 0,18, massimo 0,26) sempre nello stesso punto, al bordo inferiore del frame (circa 885, 1490). Sono piccoli, 38–61 × 29–35 px, come le macchie di A10. Risultati in `runs/v4_blockA/`.
+
+   **Blocco C, marker ArUco** (2026-11-17, 11:33–11:38, +6 dB, parete bianca, livello medio circa 85). 4 spezzoni da 60 s:
+   - `..._113301_C1_stazionario_aruco_r1` e `..._113427_..._r2`;
+   - `..._113735_C1_lento_aruco_r1` e `..._113623_C1_lento_aruco_r2`. Sono i **C2** (movimenti lenti): il nome riporta C1 per errore; non vanno rinominati.
+
+   Risultati:
+   - **Tracking al 100 % in tutti e 4**. Detector ≥ 0,5 in tutte le 290 rilevazioni di ogni spezzone (0,56–0,76).
+   - I marker ID 1 e 2 sono montati su un'asta orizzontale ai due lati del drone, quindi tracker e detector inquadrano drone, asta e marker insieme: box di circa 500 × 112 px invece di circa 290 × 90. L'aspetto del bersaglio è diverso da quello del blocco B.
+   - ArUco con i parametri di C-UASP (un frame ogni 4):
+     - stazionario: marker letti nel 100 % dei frame;
+     - movimenti lenti: ID 1 nel 96–97 %, ID 2 nell'82–91 %;
+     - lato del marker 51–52 px; distanza tra i centri dei due marker 390–405 px;
+     - nessun ID inatteso.
+   - **Anteprima di V7**: centro dei due marker (quando sono letti entrambi) meno centro del box SiamFC.
+     - Stazionario: mediana +0,6/+4 px in x, +3,5/+6,5 px in y (0,03–0,27 mrad), dispersione p5–p95 entro ±10–23 px.
+     - Movimenti lenti: mediana fino a 13–14 px (0,6 mrad, circa 1,2 cm a 21 m).
+     - Se si legge un solo marker, il suo centro dista circa 200 px dal centro del bersaglio. V7 deve usare il punto di riferimento corretto: il punto medio dei marker o gli offset per marker di C-UASP.
+   - Blocco D (camera in movimento) rimandato: per ora non è possibile. La sessione di registrazione si è chiusa il 2026-11-17.
+   - Da considerare in V7: il lato misurato dei marker (51–52 px) è circa il 10 % sotto i 57 px attesi per 5 cm a 21,0 m con la calibrazione in uso. Può dipendere dalla distanza reale (in `--distance-m` è rimasto 21,0 in tutti e 4 gli spezzoni) o dall'inclinazione dei marker. Va tenuto presente nel confronto degli angoli.
 5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
 6. V7, poi V8 al banco.

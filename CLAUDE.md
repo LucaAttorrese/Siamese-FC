@@ -138,7 +138,11 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
     - **Decisione dell'utente (2026-11-17): `CV_IDS_GAIN_DB = 6.0`** per i blocchi successivi e come impostazione attuale (luce d'uso prevista simile al 16–17 novembre). Aggiornati test, `PROVENANCE.md` (cambiamento 5) e README.
     - La normalizzazione della luminosità prima del detector è salvata come **proposta P5** in PLAN, da valutare in seguito; non è approvata.
     - **Scena vuota a +6 dB (A20–A23) fatta:** nessun aggancio. Box grezzi solo in A20: 11 deboli (≤ 0,26, 38–61 px) al bordo inferiore.
-  - **Prossimo: blocco C** (marker ArUco ID 1 e 2 sul drone, C1 stazionario e C2 lento, 2 volte ciascuno, a +6 dB), poi D (facoltativo).
+  - **Blocco C fatto** (4 spezzoni, +6 dB; i due "C1_lento" sono in realtà C2):
+    - tracking al 100 %; marker letti nell'82–100 % dei frame;
+    - centro dei marker contro centro del box SiamFC: 0,03–0,6 mrad di mediana;
+    - i marker su asta laterale allargano il bersaglio a circa 500 px. Dettagli in PLAN, punto 4b.
+  - Blocco D (facoltativo) rimandato: per ora l'utente non può farlo. **Sessione di registrazione chiusa il 2026-11-17**; prossimo passo: analisi V4 sulle registrazioni (piano proposto all'utente, da confermare).
     - Il guadagno si cambia solo da `CV_IDS_GAIN_DB` in `settings.py`: `record_ids.py` non ha un'opzione per il guadagno.
   - Analisi del blocco B: `tools/replay_siamfc_source.py <rec>/frames --calibration calibration\calibration_legacy_20260921_x_test.yaml --fps 62.6 --out ..\runs\v4_blockB\<nome>.csv` (da `cuasp_siamfc/`). Gli script di controllo (accordo tracker–detector, dettaglio delle perdite, provini con i box, prova del guadagno simulato) erano nella cartella temporanea della sessione: vanno riscritti se servono.
 
