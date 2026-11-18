@@ -183,6 +183,76 @@ def test_weak_confidence_leads_to_lost_then_recovery():
     assert s.counters["lost"] == 1 and s.counters["recovered"] == 1
 
 
+def _confidence_peak(conf):
+    """Raw peak giving ``conf`` with the references of _lock_on (peak 10, apce 20) and apce unchanged."""
+    return 10.0 * conf * conf
+
+
+def test_recovery_needs_recover_conf_hysteresis():
+    # P6 (V4 baseline 2026-11-18): the background under a stale box hovered just above lost_conf
+    s, tr = _session(lost_frames=3, lost_conf=0.25, recover_conf=0.4, ref_frames=1)
+    _lock_on(s)
+    tr.peak = _confidence_peak(0.1)
+    for i in range(3):
+        obs = s.on_frame(_frame(), (200 + i) * MS)
+    assert obs.state == STATE_LOST
+    tr.peak = _confidence_peak(0.3)  # above lost_conf, below recover_conf: stays lost
+    for i in range(6):
+        assert s.on_frame(_frame(), (210 + i) * MS).state == STATE_LOST
+    assert s.counters["recovered"] == 0
+    tr.peak = _confidence_peak(0.45)
+    for i in range(2):
+        assert s.on_frame(_frame(), (220 + i) * MS).state == STATE_LOST
+    assert s.on_frame(_frame(), 230 * MS).state == STATE_TRACKING
+    assert s.counters["recovered"] == 1
+    tr.peak = _confidence_peak(0.3)  # back in tracking, lost_conf still decides the loss
+    for i in range(5):
+        assert s.on_frame(_frame(), (240 + i) * MS).state == STATE_TRACKING
+
+
+def test_confidence_loss_at_the_frame_edge_is_not_recoverable():
+    # P6: drone leaving the frame, centre still inside, box across the left edge (B4 r1, B6)
+    s, tr = _session(lost_frames=2, recover_edge_px=8.0, ref_frames=1, max_lost_s=5.0)
+    _lock_on(s)
+    tr.center = (40.0, 240.0)  # box 100 px wide: x from -10 to 90
+    tr.peak = _confidence_peak(0.1)
+    for i in range(2):
+        obs = s.on_frame(_frame(), (200 + i) * MS)
+    assert obs.state == STATE_LOST and s.counters["lost_at_edge"] == 1
+    tr.center = (320.0, 240.0)  # even back in the middle with a good confidence
+    tr.peak = 10.0
+    for i in range(10):
+        assert s.on_frame(_frame(), (210 + i) * MS).state == STATE_LOST
+    assert s.counters["recovered"] == 0
+
+
+def test_recovery_frames_must_be_away_from_the_frame_edge():
+    s, tr = _session(lost_frames=2, recover_edge_px=8.0, ref_frames=1, max_lost_s=5.0)
+    _lock_on(s)
+    tr.peak = _confidence_peak(0.1)
+    for i in range(2):
+        obs = s.on_frame(_frame(), (200 + i) * MS)
+    assert obs.state == STATE_LOST and s.counters["lost_at_edge"] == 0  # lost in the middle: recoverable
+    tr.peak = 10.0
+    tr.center = (W - 52.0, 240.0)  # box right side at W - 2: 1.5 px from the edge
+    for i in range(5):
+        assert s.on_frame(_frame(), (210 + i) * MS).state == STATE_LOST
+    tr.center = (W - 70.0, 240.0)  # 19.5 px from the edge
+    assert s.on_frame(_frame(), 220 * MS).state == STATE_LOST
+    assert s.on_frame(_frame(), 221 * MS).state == STATE_TRACKING
+
+
+def test_recovery_defaults_keep_the_previous_behaviour():
+    from suncubes import settings
+    c = SessionConfig()
+    assert c.recover_conf == c.lost_conf and c.recover_edge_px is None
+    assert settings.CV_SIAMFC_RECOVER_CONF == settings.CV_SIAMFC_LOST_CONF and settings.CV_SIAMFC_RECOVER_EDGE_PX is None
+    for bad in ({"recover_conf": 0.2}, {"recover_conf": 1.0}, {"recover_edge_px": -1.0}, {"recover_edge_px": float("nan")}):
+        with pytest.raises(ValueError):
+            SessionConfig(**bad).validate()
+    SessionConfig(recover_conf=0.5, recover_edge_px=0.0).validate()
+
+
 def test_lost_too_long_drops_the_tracker():
     s, tr = _session(lost_frames=1, max_lost_s=0.5, ref_frames=1)
     _lock_on(s)

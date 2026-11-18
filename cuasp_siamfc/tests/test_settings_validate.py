@@ -97,12 +97,25 @@ def test_multiple_errors_are_all_reported_together(monkeypatch):
         ("CV_DETECTOR_IMGSZ", 0),
         ("CV_SIAMFC_BBOX_OFFSET_PX", (0.0,)),
         ("CV_SIAMFC_BBOX_OFFSET_PX", (0.0, float("inf"))),
+        ("CV_SIAMFC_RECOVER_CONF", 0.2),  # below CV_SIAMFC_LOST_CONF: recovery easier than staying tracked
+        ("CV_SIAMFC_RECOVER_CONF", 1.0),
+        ("CV_SIAMFC_RECOVER_CONF", None),
+        ("CV_SIAMFC_RECOVER_EDGE_PX", -1.0),
+        ("CV_SIAMFC_RECOVER_EDGE_PX", float("nan")),
+        ("CV_SIAMFC_RECOVER_EDGE_PX", True),
+        ("CV_SIAMFC_RECOVER_EDGE_PX", "8"),
     ],
 )
 def test_bad_siamfc_settings_are_rejected(monkeypatch, name, value):
     monkeypatch.setattr(settings, name, value)
     with pytest.raises(ValueError, match=name):
         settings.validate()
+
+
+def test_recovery_settings_accept_p6_values(monkeypatch):
+    monkeypatch.setattr(settings, "CV_SIAMFC_RECOVER_CONF", 0.4)
+    monkeypatch.setattr(settings, "CV_SIAMFC_RECOVER_EDGE_PX", 8)
+    settings.validate()
 
 
 def test_siamfc_settings_accept_empty_hash_and_params_dict(monkeypatch):

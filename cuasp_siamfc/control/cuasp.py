@@ -158,6 +158,8 @@ _SIAMFC_SETTING_KEYS = {
     "reinit_iou": "CV_SIAMFC_REINIT_IOU",
     "reinit_confirm": "CV_SIAMFC_REINIT_CONFIRM",
     "verify_miss_limit": "CV_SIAMFC_VERIFY_MISS_LIMIT",
+    "recover_conf": "CV_SIAMFC_RECOVER_CONF",
+    "recover_edge_px": "CV_SIAMFC_RECOVER_EDGE_PX",
 }
 _DETECTOR_SETTING_KEYS = {
     "weights_sha256": "CV_DETECTOR_WEIGHTS_SHA256",

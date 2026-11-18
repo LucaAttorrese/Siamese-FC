@@ -20,7 +20,10 @@ Structure, each part testable on its own:
   ``max_lost_s`` the tracker is dropped -> ``searching``). SiamFC keeps running in
   ``lost`` and may resume by itself only when the loss was a confidence drop: after a
   detector disagreement or with the target out of frame its confidence says nothing about
-  the drone, and only a confirmed detection can start tracking again. Detections below
+  the drone, and only a confirmed detection can start tracking again. Resuming needs
+  ``recover_conf`` for ``lost_frames`` frames; with ``recover_edge_px`` set, a loss with the
+  box at the frame edge is not recoverable and recovery frames must be away from the edge
+  (proposal P6, see ``SessionConfig``). Detections below
   ``acquire_min_score`` never start a track;
 
 Replay of DUT-Anti-UAV video15 (2026-11-10): with the drone out of frame, a static false
@@ -126,10 +129,23 @@ class SessionConfig:
     reinit_iou: float = 0.5  # a verification candidate with a lower IoU than this disagrees with the tracker
     reinit_confirm: int = 2  # consistent disagreeing verifications in a row needed to re-initialise the tracker
     verify_miss_limit: int = 2  # verification runs in a row without a candidate: tracking -> lost
+    # Spontaneous recovery from a recoverable "lost" (proposal P6, PLAN.md; V4 baseline 2026-11-18): with the
+    # same threshold for entering and leaving "lost", the background under a stale box hovered around it
+    # (0.26-0.30) and the tracker resumed "reliable" on it 3 times in the IDS recordings (B3 r2 wrong target
+    # 0.30 s; B4 r1 and B6 drone already out of the frame, box across the edge). The defaults keep the
+    # previous behaviour until the values are chosen.
+    recover_conf: float = 0.25  # confidence needed for lost_frames frames to resume by itself (>= lost_conf)
+    recover_edge_px: Optional[float] = None  # a tracked box closer than this to a frame edge (negative: across
+    #                                          it) makes a confidence loss non-recoverable and blocks the
+    #                                          recovery frames; None disables the check
 
     def validate(self) -> None:
         if not 0.0 < float(self.lost_conf) < 1.0:
             raise ValueError("lost_conf must be in (0, 1)")
+        if not float(self.lost_conf) <= float(self.recover_conf) < 1.0:
+            raise ValueError("recover_conf must be in [lost_conf, 1)")
+        if self.recover_edge_px is not None and not (math.isfinite(float(self.recover_edge_px)) and float(self.recover_edge_px) >= 0.0):
+            raise ValueError("recover_edge_px must be None or a finite number >= 0")
         for name in ("lost_frames", "ref_frames", "verify_miss_limit", "reinit_confirm"):
             if int(getattr(self, name)) < 1:
                 raise ValueError(f"{name} must be >= 1")
@@ -328,6 +344,14 @@ def _bbox_from_center(center_xy: Sequence[float], size_wh: Sequence[float]) -> t
     return (cx - w / 2.0, cy - h / 2.0, w, h)
 
 
+def _edge_distance(bbox_xywh: Sequence[float], frame_hw: Sequence[int]) -> float:
+    """Smallest distance in px from a pixel-centre box to the image border ([-0.5, W-0.5] x [-0.5, H-0.5]);
+    negative when the box crosses it."""
+    x, y, w, h = (float(v) for v in bbox_xywh)
+    fh, fw = (float(v) for v in frame_hw[:2])
+    return min(x + 0.5, y + 0.5, (fw - 0.5) - (x + w), (fh - 0.5) - (y + h))
+
+
 class SiamFCTrackingSession:
     """Tracking state machine: see the module docstring for the states and transitions.
 
@@ -353,7 +377,7 @@ class SiamFCTrackingSession:
         self._peaks: list[float] = []
         self._apces: list[float] = []
         self._last_obs = TrackObservation(STATE_SEARCHING, REASON_SEARCHING)
-        self.counters = {"inits": 0, "reinits_from_verify": 0, "lost": 0, "dropped": 0, "recovered": 0, "tracker_errors": 0}
+        self.counters = {"inits": 0, "reinits_from_verify": 0, "lost": 0, "dropped": 0, "recovered": 0, "lost_at_edge": 0, "tracker_errors": 0}
 
     @property
     def state(self) -> str:
@@ -472,6 +496,8 @@ class SiamFCTrackingSession:
         h, w = gray.shape[:2]
         cx, cy = (float(v) for v in res.center_xy)
         inside = 0.0 <= cx <= w - 1.0 and 0.0 <= cy <= h - 1.0 and math.isfinite(conf)
+        edge_px = self.cfg.recover_edge_px
+        at_edge = edge_px is not None and _edge_distance(bbox, gray.shape) < float(edge_px)
 
         if self._state == STATE_TRACKING:
             if not inside:
@@ -479,12 +505,15 @@ class SiamFCTrackingSession:
             elif conf < float(self.cfg.lost_conf):
                 self._weak += 1
                 if self._weak >= int(self.cfg.lost_frames):
-                    self._enter_lost(ts_capture_ns)
+                    # P6: a confidence loss with the box at the frame edge is treated like the target
+                    # leaving the frame: only a confirmed detection can start tracking again
+                    self._enter_lost(ts_capture_ns, recoverable=not at_edge)
+                    self.counters["lost_at_edge"] += int(at_edge)
             else:
                 self._weak = 0
         elif self._state == STATE_LOST:
             assert self._lost_since_ns is not None
-            if self._recoverable and inside and conf >= float(self.cfg.lost_conf):
+            if self._recoverable and inside and not at_edge and conf >= float(self.cfg.recover_conf):
                 self._good += 1
                 if self._good >= int(self.cfg.lost_frames):
                     self._state, self._weak, self._good, self._lost_since_ns = STATE_TRACKING, 0, 0, None

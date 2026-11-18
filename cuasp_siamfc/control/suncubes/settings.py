@@ -335,6 +335,12 @@ CV_SIAMFC_VERIFY_MAX_SIZE_RATIO = 1.5
 CV_SIAMFC_REINIT_IOU = 0.5
 CV_SIAMFC_REINIT_CONFIRM = 2
 CV_SIAMFC_VERIFY_MISS_LIMIT = 2
+# Spontaneous recovery from "lost" (proposal P6 in PLAN.md, 2026-11-18). These defaults keep the
+# behaviour measured in the V4 baseline (recovery at CV_SIAMFC_LOST_CONF, no edge check); the values
+# are chosen after the V4 replays. CV_SIAMFC_RECOVER_CONF must be >= CV_SIAMFC_LOST_CONF;
+# CV_SIAMFC_RECOVER_EDGE_PX is None (off) or px >= 0.
+CV_SIAMFC_RECOVER_CONF = 0.25
+CV_SIAMFC_RECOVER_EDGE_PX = None
 
 # Drone detector (siamfc.detector.DetectorConfig / ConfirmerConfig).
 CV_DETECTOR_DEVICE = ""  # "" = Ultralytics default (first CUDA GPU when available)
@@ -526,6 +532,17 @@ def validate() -> None:
             ok = False
         if not ok:
             errors.append(f"{name} must be in (0, 1), got {value!r}")
+    try:
+        recover_ok = float(CV_SIAMFC_LOST_CONF) <= float(CV_SIAMFC_RECOVER_CONF) < 1.0
+    except (TypeError, ValueError):
+        recover_ok = False
+    if not recover_ok:
+        errors.append(f"CV_SIAMFC_RECOVER_CONF must be in [CV_SIAMFC_LOST_CONF, 1), got {CV_SIAMFC_RECOVER_CONF!r}")
+    if CV_SIAMFC_RECOVER_EDGE_PX is not None:
+        edge_ok = (isinstance(CV_SIAMFC_RECOVER_EDGE_PX, (int, float)) and not isinstance(CV_SIAMFC_RECOVER_EDGE_PX, bool)
+                   and math.isfinite(float(CV_SIAMFC_RECOVER_EDGE_PX)) and float(CV_SIAMFC_RECOVER_EDGE_PX) >= 0.0)
+        if not edge_ok:
+            errors.append(f"CV_SIAMFC_RECOVER_EDGE_PX must be None or a finite number >= 0, got {CV_SIAMFC_RECOVER_EDGE_PX!r}")
     for name in (
         "CV_SIAMFC_LOST_FRAMES", "CV_SIAMFC_REF_FRAMES", "CV_SIAMFC_REINIT_CONFIRM", "CV_SIAMFC_VERIFY_MISS_LIMIT",
         "CV_DETECTOR_MAX_DET", "CV_DETECTOR_CONFIRM_FRAMES",

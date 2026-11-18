@@ -13,7 +13,7 @@ Il piano dettagliato, con lo stato di ogni fase, è in [PLAN.md](PLAN.md). La pr
 - **Sicurezza** (sistema di puntamento fisico, regole di C-UASP): non indebolire limiti, clamp, controlli di freschezza del campione o stop su perdita; nessuna conversione di unità implicita. Le prove dal vivo partono con `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`.
 - **Motori disabilitati di default** (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` in `settings.py`, decisione del 2026-11-10). **Quando si arriva alla prova con motori abilitati (V8), ricordarlo all'utente prima di iniziare:** vanno abilitati esplicitamente e solo per quella prova.
 - Prima di comandi lunghi o costosi (training, download di GB, ricerche di iperparametri) indicare durata e spazio previsti. I processi lunghi vanno in background, con un controllo che si fermi anche in caso di errore.
-- Le proposte P1–P5 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle.
+- Le proposte P1–P6 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle.
 
 ## Cos'è questo progetto
 
@@ -42,12 +42,14 @@ cuasp_siamfc/
   control/suncubes/siamfc_source.py  sorgente camera ids_siamfc: macchina a stati, geometria Z fissa, adapter
   control/suncubes/siamfc/      port SiamFC (convert_matconvnet, net, tracker, imresize) + detector.py (YOLO)
   tools/                        eval_sequence, bench_siamfc, prepare_yolo_dataset, train_detector,
-                                eval_detector, replay_siamfc_source, record_ids
+                                eval_detector, replay_siamfc_source, record_ids,
+                                prelabel_ids + review_labels + ids_labels (etichette V4)
   tests/                        test C-UASP copiati + test SiamFC, detector, adapter, e2e con cuasp.main()
   .venv/                        ambiente Python (gitignored)
 pretrained/                     pesi CFNet .mat e .pth convertiti (gitignored)
 datasets/                       dataset + MANIFEST.md (link, hash, ricostruzione; dati gitignored)
-runs/                           output dei training (gitignored)
+runs/                           output dei training e delle analisi (gitignored); runs/v4_labels: cache delle rilevazioni e backup delle etichette
+labels/ids/                     etichette V4 delle registrazioni IDS (CSV + JSON, versionate: contengono il lavoro di revisione dell'utente)
 reference/cfnet/                sorgenti MATLAB di CFNet usati come riferimento
 demo-sequences/vot15_bag/       sequenza demo per i controlli di regressione
 ```
@@ -142,7 +144,19 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
     - tracking al 100 %; marker letti nell'82–100 % dei frame;
     - centro dei marker contro centro del box SiamFC: 0,03–0,6 mrad di mediana;
     - i marker su asta laterale allargano il bersaglio a circa 500 px. Dettagli in PLAN, punto 4b.
-  - Blocco D (facoltativo) rimandato: per ora l'utente non può farlo. **Sessione di registrazione chiusa il 2026-11-17**; prossimo passo: analisi V4 sulle registrazioni (piano proposto all'utente, da confermare).
+  - Blocco D (facoltativo) rimandato: per ora l'utente non può farlo. **Sessione di registrazione chiusa il 2026-11-17.**
+  - **V4 anticipato** rispetto a V3 e V4b (decisione dell'utente del 2026-11-17).
+    - **Fase 1 (etichette) completata il 2026-11-18**: 29 registrazioni in `labels/ids/`, rivedute dall'utente. Non rigenerarle mai (`--force`): contengono la revisione. Backup in `runs/v4_labels/backups/`.
+    - Convenzione per il drone in parte fuori dal frame in PLAN, "Ordine di esecuzione" punto 5.
+    - `review_labels.py` ignora il Bloc Maiusc dal 2026-11-18: prima, con il Bloc Maiusc attivo, funzionava solo lo spazio.
+    - **Fase 2 (misura di partenza) fatta il 2026-11-18**: `runs/v4_baseline/`, riepilogo con `tools/v4_report.py ../runs/v4_baseline --empty ../runs/v4_blockA`.
+      - Copertura 85,3 %, errore 0,40 mrad di mediana, 0 falsi allarmi sulla scena vuota.
+      - Frame persi: quasi tutti per score del detector sotto 0,5 prima dell'aggancio.
+      - Episodi pericolosi: tre riprese spontanee da "lost" con confidenza appena sopra 0,25, proposta P6.
+    - **Fase 3 avviata il 2026-11-18 con P6** (approvata dall'utente per implementazione e misura).
+      - Implementata con valori che non cambiano il comportamento: `CV_SIAMFC_RECOVER_CONF = 0.25`, `CV_SIAMFC_RECOVER_EDGE_PX = None`. Suite: 320 passati + 1 fallimento noto.
+      - **Prossimo passo: misurare le 4 varianti** (comandi e piano in PLAN, "Proposta P6"; circa 2–2,5 ore in background, niente registrazioni nel frattempo). Poi far scegliere i valori all'utente.
+      - Dopo P6: la soglia di aggancio (`CV_SIAMFC_ACQUIRE_MIN_SCORE`, `CV_DETECTOR_CONFIRM_FRAMES`, da riprovare anche sulla scena vuota); facoltativo, nuovo training del detector con i frame IDS etichettati.
     - Il guadagno si cambia solo da `CV_IDS_GAIN_DB` in `settings.py`: `record_ids.py` non ha un'opzione per il guadagno.
   - Analisi del blocco B: `tools/replay_siamfc_source.py <rec>/frames --calibration calibration\calibration_legacy_20260921_x_test.yaml --fps 62.6 --out ..\runs\v4_blockB\<nome>.csv` (da `cuasp_siamfc/`). Gli script di controllo (accordo tracker–detector, dettaglio delle perdite, provini con i box, prova del guadagno simulato) erano nella cartella temporanea della sessione: vanno riscritti se servono.
 

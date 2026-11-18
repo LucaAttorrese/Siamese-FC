@@ -315,6 +315,39 @@ Non approvata: decisione dell'utente rimandata. Per ora il rimedio è il guadagn
 
 Per numeri solidi nei tratti senza tracking servono etichette su un campione di frame, pre-generate e corrette dall'utente (già previste per V4). Stima: 1–2 ore di implementazione e test, 1–1,5 ore di calcolo in background.
 
+## Proposta P6 — Isteresi sulla ripresa spontanea del tracker (2026-11-18): implementata con i valori attuali, valori da scegliere
+
+**Problema** (V4, misura di partenza). Dopo una perdita per confidenza bassa (`lost` recuperabile), `TrackingSession` torna in `tracking` da sola se la confidenza resta ≥ `lost_conf` (0,25) per `lost_frames` (5) frame. Entrata e uscita da `lost` usano la stessa soglia. Nelle 29 registrazioni:
+- 9 riprese vere del tracker, cioè senza nuova inizializzazione e con il box continuo: 7 buone, con confidenza 0,27–0,5; 2 sbagliate, a 0,26–0,27, che sono i due episodi pericolosi della misura (B3 r2 bersaglio sbagliato per 0,30 s, B4 r1 drone assente per 0,42 s);
+- nella replica di ieri un terzo caso uguale (B6, 0,29–0,30, 26 frame).
+
+Due casi su tre seguono un'uscita del drone dal bordo: il centro del box è rimasto nel frame, quindi la perdita è stata giudicata recuperabile, ma il box sporgeva dal bordo. Il terzo è un drone veloce che si allontana: il box resta sul bordo porta/parete.
+
+**Proposta** (due parti indipendenti, valori di default = comportamento attuale finché non approvate):
+1. `recover_conf` in `SessionConfig`: la ripresa da `lost` richiede confidenza ≥ `recover_conf` (≥ `lost_conf`). Candidati da misurare: 0,35, 0,4 e 0,5.
+2. Nessuna ripresa spontanea se il box tracciato sporge dal frame, o è entro pochi px dal bordo: il drone può essere uscito, e solo una rilevazione confermata riparte.
+
+**Effetto atteso**: i tre episodi spariscono. Il costo stimato va da 4 a 6 riprese buone che diventano riagganci del detector, circa 0,4–0,6 s di copertura ciascuna.
+
+**Validazione**:
+- replay delle 29 registrazioni, più la scena vuota se cambia l'aggancio (con queste modifiche non dovrebbe cambiare);
+- confronto con `v4_report.py`: episodi pericolosi azzerati, copertura entro la variabilità (circa 1 punto per scenario);
+- test unitari in `test_siamfc_source_adapter.py`.
+
+È un cambiamento di comportamento di `siamfc_source.py`, codice nuovo e non copiato da C-UASP: se approvato, va documentato nel README.
+
+**Stato (2026-11-18).** L'utente ha approvato l'implementazione e la misura; i valori li sceglie dopo la misura.
+- **Implementazione**: `SessionConfig.recover_conf` / `recover_edge_px` in `siamfc_source.py`, impostazioni `CV_SIAMFC_RECOVER_CONF = 0.25` e `CV_SIAMFC_RECOVER_EDGE_PX = None` in `settings.py` (valori che riproducono il comportamento attuale), mappa in `cuasp.py`, validazione in `settings.validate()` e `SessionConfig.validate()`.
+  - Con `recover_edge_px` impostato, una perdita per confidenza con il box a meno di quei px dal bordo non è recuperabile (contatore `lost_at_edge`), e i frame di ripresa devono essere lontani dal bordo.
+- **Test**: 4 in `test_siamfc_source_adapter.py` (isteresi, perdita al bordo, ripresa lontano dal bordo, default e validazione), 8 casi in `test_settings_validate.py`. Suite: 320 passati + 1 fallimento noto. Prova breve del replay: le impostazioni passate con `--siamfc` arrivano alla sessione.
+- **Da fare: la misura** (per decisione dell'utente non fatta nella sessione del 2026-11-18). Circa 2–2,5 ore in background, niente registrazioni nel frattempo. Varianti, ognuna sulle 29 registrazioni in tempo reale, una dopo l'altra:
+  1. `--siamfc recover_edge_px=8`;
+  2. `--siamfc recover_edge_px=8 recover_conf=0.35`;
+  3. `--siamfc recover_edge_px=8 recover_conf=0.4`;
+  4. `--siamfc recover_edge_px=8 recover_conf=0.5`.
+  
+  Poi una replica di conferma della variante scelta, e il confronto con la misura di partenza: `tools/v4_report.py ../runs/v4_p6_<variante>` contro `../runs/v4_baseline`. La scena vuota non serve, perché la ripresa avviene solo da `lost`, che senza aggancio non si verifica.
+
 ## Ordine di esecuzione (sul PC di training, RTX 5060 Laptop)
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).
@@ -442,5 +475,35 @@ Per numeri solidi nei tratti senza tracking servono etichette su un campione di 
      - Se si legge un solo marker, il suo centro dista circa 200 px dal centro del bersaglio. V7 deve usare il punto di riferimento corretto: il punto medio dei marker o gli offset per marker di C-UASP.
    - Blocco D (camera in movimento) rimandato: per ora non è possibile. La sessione di registrazione si è chiusa il 2026-11-17.
    - Da considerare in V7: il lato misurato dei marker (51–52 px) è circa il 10 % sotto i 57 px attesi per 5 cm a 21,0 m con la calibrazione in uso. Può dipendere dalla distanza reale (in `--distance-m` è rimasto 21,0 in tutti e 4 gli spezzoni) o dall'inclinazione dei marker. Va tenuto presente nel confronto degli angoli.
-5. V3 (OTB), poi V4b (ricerca iperparametri), poi V4 (dati drone e IDS) e taratura delle soglie.
+5. **V4 anticipato** (decisione dell'utente del 2026-11-17): prima V4 sulle registrazioni IDS, poi V3 (OTB) e V4b (ricerca iperparametri). Motivo: i dati sono freschi, e i problemi emersi riguardano detector e soglie più degli iperparametri del tracker. Fasi di V4:
+   1. etichette: pre-etichettatura automatica (`tools/prelabel_ids.py`) e revisione dell'utente (`tools/review_labels.py`), file in `labels/ids/`.
+      - Strumenti scritti il 2026-11-17, test in `tests/test_ids_labels.py` (19).
+      - La pre-etichettatura usa il detector su frame schiariti (solo per le etichette) più SiamFC avanti e indietro tra le rilevazioni sicure.
+      - Prova su B6 r2 (porta, 0 dB): drone etichettato in tutti i 3757 frame, solo l'1,9 % da rivedere, box corretti sul provino. B4 r1 (uscite): il 33 % è da rivedere, quasi tutto tratti in cui il drone è fuori dal frame.
+      - Velocità: circa 24 frame/s. Tutte le 29 registrazioni con drone richiedono circa 1,5 ore.
+      - **Pre-etichettatura v2** (2026-11-17, `flag_for_review`). Il controllo sui provini di B3 r1 e B4 r2 ha mostrato che, quando il drone esce dal frame, SiamFC resta sul bordo o su una macchia della parete, con buona confidenza. Molti di quei frame non erano segnalati: entro 1 s dal punto di ancoraggio la v1 si fidava del tracker, e le due direzioni concordavano sulla stessa macchia. La v2 segnala inoltre:
+        - box del tracker e `det_weak` entro 8 px dal bordo;
+        - box del tracker senza nessuna rilevazione vicina entro ±16 frame.
+        Rigenerate le 28 registrazioni senza revisione, usando la cache delle rilevazioni. B6 r2 era già rivisto dall'utente per intero, senza correzioni, ed è rimasto intatto. Da rivedere: B4 r1/r2 43–45 % (9–12 tratti, quasi tutto drone fuori dal frame), B3 5–10 % (10–28 tratti), gli altri 0–1,4 %.
+      - **Convenzione per il drone in parte fuori dal frame**: presente se se ne vede una parte riconoscibile; il box del tracker può sporgere fuori dal frame. Assente quando è uscito del tutto. Nella fase 2 l'IoU si calcola sui box ritagliati al frame, e i frame con il box vicino al bordo si riportano a parte.
+      - Blocco C: il box del detector comprende drone e marker sull'asta (circa 500 px). Lasciato così: il centro resta simmetrico e il blocco serve soprattutto per V7;
+      - **Revisione dell'utente completata il 2026-11-18**: 28 registrazioni rivedute al 100 %; B1 a terra al 75 %, senza frame dubbi. Il controllo di coerenza non trova frame isolati né salti anomali.
+   2. ✅ misura di partenza con le etichette (2026-11-18).
+      - Replay delle 29 registrazioni con `--gt`, impostazioni attuali, calibrazione `_x_test`, 62,6 fps in tempo reale; risultati in `runs/v4_baseline/` (`report.json`, `baseline.log`).
+      - Riepilogo con il nuovo `tools/v4_report.py` (test `tests/test_v4_report.py`). Con `--labels` valuta anche repliche fatte senza `--gt`, con lo stesso criterio del replay: le repliche del 16–17 novembre (`runs/v4_blockB`) danno `report_prev_replays.json`.
+      - **Totale**: copertura 85,3 % (85,7 % esclusi i frame sul bordo); errore del centro 0,40 mrad di mediana e 1,21 al p90; IoU mediano 0,81; primo aggancio in 0,26 s nella maggior parte degli spezzoni; riaggancio dopo il rientro del drone 0,43 s di mediana (massimo 3,3 s, nessun rientro mancato).
+      - **Scena vuota**: 0 frame affidabili in 16 minuti, 16 spezzoni del blocco A a 0 e 6 dB.
+      - **Copertura per scenario**:
+        - 98,7–99,6 % per B1, B7 e C;
+        - B2 80 % (r4 di sera, porta scura: 40 %), B3 80 %, B4 84 % (93 % esclusi i bordi), B5 86 %;
+        - B6 a 0 dB 60 % (34–99 %), B6 a 6 dB 89 %.
+      - **Frame persi**: quasi tutti in "searching", cioè il detector non conferma con score ≥ 0,5. Prima dell'aggancio vede il drone con score 0,2–0,43 (B3 r2 aggancia a 6,9 s, B6 6 dB r3 a 4,7 s). Il resto è in "lost" (rotazioni B5, drone veloce B3).
+      - **Episodi pericolosi**: 29 frame con bersaglio sbagliato (B3 r2, un tratto di 0,30 s) e 26 con drone assente (B4 r1, 0,42 s). Il ritardo nel dichiarare la perdita dopo un'uscita è di 0,02 s di mediana e 0,30 s al massimo.
+        - Tutti e due gli episodi, e un terzo comparso solo nella replica di ieri (B6, 26 frame), sono **riprese spontanee del tracker dopo "lost"** con confidenza appena sopra la soglia (0,26–0,30) su sfondo o bordo: proposta P6.
+      - **Variabilità tra due esecuzioni identiche** (oggi contro 16–17 novembre): copertura per scenario entro 0,8 punti. Gli episodi pericolosi invece compaiono o no (B6 a 0 dB: 26 frame ieri, 0 oggi): vanno confrontati su più esecuzioni, o contati comunque come presenti.
+      - Quasi tutti gli spezzoni sono a 0 dB, mentre l'impostazione attuale è 6 dB: B6 e B2 a 0 dB sono prove di stress.
+   3. taratura delle soglie con vincoli di sicurezza (zero agganci sulla scena vuota, bersaglio sbagliato praticamente zero);
+   4. validazione finale.
+
+   Facoltativi, da decidere dopo la fase 2: P5, nuovo training del detector con frame IDS, V4b, V3.
 6. V7, poi V8 al banco.

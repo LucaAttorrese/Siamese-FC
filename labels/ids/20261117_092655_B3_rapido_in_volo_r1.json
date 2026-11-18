@@ -1,0 +1,83 @@
+{
+  "tool_version": "2026-11-17-prelabel-ids-v2",
+  "created": "2026-11-17T13:29:40",
+  "recording": "C:\\Users\\AI\\GitHubDesktop\\Siamese-FC\\recordings\\20261117_092655_B3_rapido_in_volo_r1",
+  "frames": 3757,
+  "frame_size": [
+    2040,
+    1536
+  ],
+  "coordinates": "edge (x, y top-left; image spans [0, W] x [0, H])",
+  "detections_cache": "C:\\Users\\AI\\GitHubDesktop\\Siamese-FC\\runs\\v4_labels\\20261117_092655_B3_rapido_in_volo_r1_dets.csv",
+  "detector_input": {
+    "enhance": true,
+    "target_mean": 80.0,
+    "max_gain": 3.0,
+    "gain_median": 2.133,
+    "det_every": 1
+  },
+  "params": {
+    "strong_score": 0.5,
+    "weak_score": 0.15,
+    "anchor_window": 3,
+    "anchor_max_shift": 0.5,
+    "agree_iou": 0.5,
+    "trust_frames": 63,
+    "max_track_frames": 626,
+    "lost_conf": 0.25,
+    "lost_frames": 5,
+    "edge_margin_px": 8.0,
+    "support_window": 16,
+    "support_dist": 0.75
+  },
+  "weights": {
+    "siamfc": {
+      "path": "C:\\Users\\AI\\GitHubDesktop\\Siamese-FC\\pretrained\\networks\\baseline-conv5_gray_e100.pth",
+      "sha256": "d858fec57757d1fa6eb5c9c3163b826d0337298aa91f68247bf9522562cfbb6f"
+    },
+    "detector": {
+      "path": "C:\\Users\\AI\\GitHubDesktop\\Siamese-FC\\runs\\detector\\yolo11s_uav_gray_1280_e40\\weights\\best.pt",
+      "sha256": "3a7c173244899df1ac5185916cbb8196bd0959b3d5626acc9f9cc3976d8040d5"
+    }
+  },
+  "recording_meta": {
+    "name": "B3_rapido_in_volo_r1",
+    "block": "B",
+    "notes": "in volo centrato con movimenti veloci parte 1, sfondo parete grigia e bianca alternata",
+    "distance_m": 20.2,
+    "drone": "Mavic Mini",
+    "lighting": "accese",
+    "started_at": "2026-11-17T09:26:55",
+    "tool_version": "2026-11-16-record-ids-v2",
+    "camera": {
+      "ExposureTime": 14999.3265993266,
+      "Gain": 1.0,
+      "AcquisitionFrameRate": 62.60856367101202,
+      "Width": 2040,
+      "Height": 1536,
+      "OffsetX": 8,
+      "OffsetY": 8
+    }
+  },
+  "counts": {
+    "frames": 3757,
+    "present": 3605,
+    "absent": 152,
+    "flagged": 8,
+    "reviewed": 3757,
+    "flagged_not_reviewed": 0,
+    "sources": {
+      "det": 3440,
+      "det_weak": 147,
+      "blend": 12,
+      "fwd": 1,
+      "bwd": 5,
+      "absent": 38,
+      "manual_absent": 114
+    }
+  },
+  "review": {
+    "tool_version": "2026-11-17-review-labels-v1",
+    "last_saved": "2026-11-17T16:56:36"
+  }
+}

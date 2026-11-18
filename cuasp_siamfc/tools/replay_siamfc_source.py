@@ -21,7 +21,9 @@ Usage (from cuasp_siamfc/)::
 Input: a folder of images (sorted by name; jpg/png/bmp/tif) or a video file. Frames are
 converted to Mono8. Ground truth (``--gt``): one line per frame, ``x y w h`` (spaces or
 commas), top-left corner in edge coordinates as in DUT-Anti-UAV and YOLO; a line with
-w <= 0, h <= 0 or x < 0 marks the target as absent.
+w <= 0, h <= 0 or x < 0 marks the target as absent. The IDS label files of
+``tools/prelabel_ids.py`` / ``tools/review_labels.py`` (``labels/ids/<recording>.csv``)
+are accepted as they are.
 
 Metrics. Every reliable frame (``reason == "ok"``) with ground truth falls in one of:
 ``correct`` (target present and tracked centre within max(gt w, gt h) of the true centre),
@@ -63,9 +65,23 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
 
 def read_gt(path: Path, n_frames: Optional[int] = None) -> np.ndarray:
-    """(N, 4) array of x, y, w, h (edge coordinates); rows of absent targets are NaN."""
+    """(N, 4) array of x, y, w, h (edge coordinates); rows of absent targets are NaN.
+
+    Also reads the label files of ``tools/prelabel_ids.py`` / ``tools/review_labels.py``
+    (CSV with a ``frame,present,x,y,w,h,...`` header, edge coordinates).
+    """
+    text = Path(path).read_text()
+    if text.startswith("frame,present,"):
+        rows = []
+        for i, r in enumerate(csv.DictReader(text.splitlines())):
+            if int(r["frame"]) != i:
+                raise ValueError(f"{path}: row {i} has frame {r['frame']}")
+            present = int(r["present"])
+            rows.append([float(r[k]) for k in ("x", "y", "w", "h")] if present else [np.nan] * 4)
+        gt = np.asarray(rows, float).reshape(-1, 4)
+        return gt if n_frames is None else gt[:n_frames]
     rows = []
-    for line in Path(path).read_text().splitlines():
+    for line in text.splitlines():
         parts = line.replace(",", " ").split()
         if not parts:
             continue
