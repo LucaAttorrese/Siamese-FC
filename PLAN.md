@@ -360,6 +360,41 @@ Due casi su tre seguono un'uscita del drone dal bordo: il centro del box è rima
   - **Applicata**: `CV_SIAMFC_RECOVER_CONF = 0.35` e `CV_SIAMFC_RECOVER_EDGE_PX = 8.0` in `settings.py`, stessi valori come default di `SessionConfig`. `tools/replay_siamfc_source.py` usa i default delle dataclass e non `settings.py`: il test nuovo `test_replay_defaults_match_the_runtime_settings` (in `test_camera_config_routing.py`) verifica che coincidano per tutti i parametri della sorgente. Suite: 321 passati + 1 fallimento noto.
   - Documentata nel README ("Implementation notes" e "Validation status").
 
+## Proposta P7 — SiamMask al posto di SiamFC (2026-11-19): passo 0 (fattibilità) approvato
+
+**Idea.** SiamMask (Wang et al., CVPR 2019; codice MIT, `github.com/foolwood/SiamMask`) sostituisce la correlazione di SiamFC con una ResNet-50 (fino al terzo stadio, stride 8), un RPN che adatta le proporzioni del box e un ramo di maschera. Si usano i pesi pubblicati, senza training. Restano uguali la macchina a stati di `siamfc_source.py` (accetta qualsiasi tracker con `init`/`update` che restituisca centro, dimensione, picco e APCE), il detector, la geometria, `cuasp.py`, il replay e `v4_report.py`.
+
+**Guadagno atteso limitato.** In V4 i frame persi sono quasi tutti prima dell'aggancio (detector), e con il drone agganciato SiamFC è già preciso (0,35–0,40 mrad di mediana). Dove potrebbe aiutare: box che segue le proporzioni (rotazioni B5, deriva verticale B1 r2), meno derive sullo sfondo (B3 r2, B6 6 dB r3), centro della maschera come punto di mira.
+
+**Rischi.** Latenza (paper: 56 fps con maschera su RTX 2080; budget 16 ms a 62,6 fps condiviso con la verifica YOLO); pesi a colori contro camera Mono8 (canale replicato); confidenza diversa (punteggio di classificazione), quindi soglie V4 e P6 da ritarare; codice del 2019 da portare a PyTorch recente.
+
+**Passi.**
+0. Fattibilità, circa 1 giorno (**approvato dall'utente il 2026-11-19**, mentre V7/V8 aspettano): pesi con hash; port della rete; latenza sul 5060 con e senza maschera, FP32 e FP16; confronto del solo tracker con SiamFC su `vot15_bag` e sulle registrazioni IDS critiche (inizializzazione dalle etichette). Si va avanti solo se la latenza sta nel budget e le registrazioni critiche migliorano.
+1. Integrazione, circa 2 giorni: impostazione per scegliere il tracker (SiamFC resta il default), confidenza, test, `PROVENANCE.md`, README.
+2. Misura V4 completa e ritaratura delle soglie.
+
+Alternativa più leggera da tenere presente: SiamRPN++ con MobileNetV2 (pysot).
+
+**Passo 0 fatto il 2026-11-19** (codice in `cuasp_siamfc/experiments/siammask/`, fuori dal runtime; risultati in `runs/siammask_step0/`: `summary.txt`, `bench_contention.txt`, CSV per registrazione).
+- **Pesi e codice**: commit `a2b3ce3` e `SiamMask_VOT.pth` (101 533 952 B), hash nel README dell'esperimento. Il file è un pickle del 2019: caricato con `weights_only=True`, ammettendo solo i tipi numpy trovati con `pickletools`; 356 parametri su 356.
+- **Port fedele**: sulla sequenza demo il percorso veloce (crop sulla GPU, maschera calcolata solo nella sua finestra, FP16) coincide con l'originale (centro a 0,6 px di mediana). IoU 0,830 a colori e 0,835 in grigio, contro 0,773 / 0,796 di SiamFC; errore del centro 4,2 px contro 5,9. Il grigio non pesa.
+- **Latenza**, frame IDS 2040x1536, GPU libera: solo box 7,3 ms (FP32), **5,9 ms in FP16 con le batch norm fuse nelle convoluzioni** (senza fusione l'FP16 è più lento); con maschera 8,6–9,9 ms; maschera dell'originale sul frame intero 15,4 ms (p99 19). SiamFC: 6,0–7,8 ms.
+  - Con YOLO a 5 Hz sulla stessa GPU (`bench_contention.py`, B6 6 dB r3): SiamFC mediana 7,7 ms, p99 24,9, 9,2 % dei frame oltre 16 ms; SiamMask solo box 7,7 ms, p99 24,9, 6,0 %; SiamMask con maschera 10,3 ms, p99 29,5, 14,7 %. Con questa misura (thread Python, frame precaricati) anche SiamFC sfora più che in V5 (2,3 %): vale il confronto relativo.
+- **Solo tracker sulle 29 registrazioni IDS** (`compare_ids.py`: inizializzazione dalle etichette, nessun detector né verifica, nuova inizializzazione 5 frame dopo un fallimento con IoU 0):
+
+  | | fallimenti | IoU medio | IoU > 0,5 | errore mediana / p90 | frame in deriva (IoU < 0,3) | AUC della confidenza |
+  |---|---|---|---|---|---|---|
+  | SiamFC | 13 | 0,634 | 70,0 % | 0,71 / 2,23 mrad | 6124 | 0,54 |
+  | SiamMask, box RPN | 1 | 0,767 | 96,4 % | 0,32 / 0,76 mrad | 284 | 0,85 |
+  | SiamMask, box della maschera | 1 | 0,696 | 97,8 % | 0,37 / 0,74 mrad | 240 | – |
+
+  - SiamMask migliore in 24 registrazioni su 29: deriva quasi azzerata su drone veloce (B3 r2 779 → 108 frame, B3 r3 820 → 28), uscite (B4 671 → 95 e 335 → 0), sfondi scuri (B2 r4 1082 → 24, B6 r2 530 → 7), rotazioni (B5 r2 309 → 0), scivolamento verso l'alto del box (B1 r2: errore 1,17 → 0,27 mrad).
+  - SiamFC migliore in B1 r1, B7 18 m e C1 lento (IoU 0,84–0,95 contro 0,74–0,86): il box di SiamMask è un po' più piccolo (0,85–0,95) o, con l'asta dei marker, più grande (1,10) dell'etichetta. Le etichette sono state pre-generate con detector e SiamFC: se c'è una distorsione, favorisce SiamFC.
+  - La confidenza di SiamMask (probabilità del ramo di classificazione, stessa formula picco × APCE) distingue molto meglio i frame buoni da quelli in deriva (AUC 0,85 contro 0,54): conta per le soglie di perdita e per P6.
+  - La maschera non migliora il punto di mira rispetto al box RPN: basta il **solo box**, con la latenza di SiamFC.
+- **Limite della misura**: senza la verifica a 5 Hz il confronto è più duro del runtime. Nel replay completo SiamFC arriva a 0,35 mrad di mediana perché la verifica corregge le derive; il guadagno reale nel sistema si misura solo con i passi 1–2. Non cambia la causa principale dei frame persi (detector prima dell'aggancio).
+- **Esito del passo 0**: entrambe le condizioni sono soddisfatte (latenza nel budget con il solo box, registrazioni critiche migliori). I passi 1–2 aspettano la decisione dell'utente.
+
 ## Ordine di esecuzione (sul PC di training, RTX 5060 Laptop)
 
 1. ✅ Setup secondo `cuasp_siamfc/README.md` (venv cu130 con Python 3.13, pesi, test, `bench_siamfc.py`) e registrazione della latenza V5 (2026-11-06).

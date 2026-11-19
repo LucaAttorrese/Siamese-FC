@@ -169,6 +169,11 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
         - Il laser dovrebbe andare leggermente più in basso, di quanto va misurato al banco; poi `(0, +dy)` in px (1 cm a 21 m ≈ 11,5 px).
         - In V7 il riferimento è il punto medio semplice dei marker, senza i 5 cm di `CV_CUAS_TARGET_MIDPOINT_OFFSET_CM`.
         - Dettagli in PLAN, "Decisioni prese con l'utente".
+      - **P7 SiamMask, passo 0 (fattibilità) fatto il 2026-11-19**, approvato dall'utente mentre V7/V8 aspettano. Dettagli in PLAN, "Proposta P7".
+        - Codice in `cuasp_siamfc/experiments/siammask/`, fuori dal runtime; pesi in `pretrained/siammask/`; sorgenti originali in `reference/siammask_dl/`.
+        - Solo box, FP16 con batch norm fuse: 5,9 ms, come SiamFC anche con YOLO in parallelo.
+        - Solo tracker sulle 29 registrazioni: fallimenti 13 → 1, deriva 6124 → 284 frame, errore 0,71 → 0,32 mrad, AUC della confidenza 0,54 → 0,85. Senza la verifica, quindi più duro del runtime.
+        - I passi 1–2 (integrazione, misura V4) non sono approvati.
       - **Prossimi passi possibili** (da far scegliere all'utente):
         - resto della fase 3: `reinit_iou`, verifica più frequente a confidenza intermedia, dimensione minima dei box legata alla distanza; nessuno è proposto né approvato;
         - fase 4, validazione finale di V4;
@@ -184,7 +189,7 @@ Quando l'utente ha le registrazioni (cartelle `recordings/<data_ora>_<nome>/`, g
 2. misurare il divario di dominio (dataset all'aperto contro uso al coperto) e i falsi positivi persistenti della scena, il limite noto della Fase 3;
 3. tarare `CV_SIAMFC_ACQUIRE_MIN_SCORE`, le soglie di perdita e la confidenza; se servono, aggiungere i frame etichettati al dataset del detector (PLAN Fase 2, punto 4).
 
-**Stato git:** tutto committato fino a `8a98d0d` "Update: p6" (P6 compresa). **Non ancora committati** (soglia di aggancio, 2026-11-19), da far committare all'utente: `settings.py`, `siamfc/detector.py`, `siamfc_source.py`, `tests/test_siamfc_source_adapter.py`, `cuasp_siamfc/README.md`, `PLAN.md` e questo file.
+**Stato git:** tutto committato fino a `01c9820` "Fix pointing" (soglia di aggancio e punto di mira compresi). **Non ancora committati** (P7 passo 0, 2026-11-19): `PLAN.md`, questo file e la cartella nuova `cuasp_siamfc/experiments/siammask/`. La cartella `reference/siammask_dl/` (16 MB: zip e sorgenti originali di SiamMask) non è tracciata: decide l'utente se versionarla o ignorarla.
 
 **Ultima modifica fatta (2026-11-11), opzione A scelta dall'utente:** in `MotorCommandDispatcher` lo stop su perdita viene inviato dal worker `_run()` invece che da un task separato, quindi arriva sempre dopo un `abs_rotate` già in volo. Un comando la cui lettura encoder era in corso al momento della perdita viene scartato. È documentato come cambiamento di comportamento rispetto a C-UASP in `cuasp_siamfc/PROVENANCE.md` e nel README ("Behaviour changes with respect to C-UASP"). In C-UASP la corsa resta, perché quel repository non si modifica. Test end-to-end 30/30, suite 251 passati + 1 fallimento noto.
 
