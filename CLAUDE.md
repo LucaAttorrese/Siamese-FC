@@ -165,6 +165,10 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
         - Risultati in `runs/v4_acq_*` e `runs/v4_acq/`, dettagli in PLAN ("Ordine di esecuzione", punto 5.3). Suite: 322 passati + 1 fallimento noto.
       - Visto nella variante 0,4 / 2: una ripresa spontanea sbagliata a 0,36, sopra `recover_conf`, per 0,59 s. P6 non modificata.
       - Solo 7 registrazioni con drone sono a 6 dB (B6 6 dB, C): le altre sono a 0 dB, registrate prima della decisione sul guadagno.
+      - **Punto di mira (decisione dell'utente del 2026-11-19): centro del box**, `CV_SIAMFC_BBOX_OFFSET_PX = (0, 0)`.
+        - Il laser dovrebbe andare leggermente più in basso, di quanto va misurato al banco; poi `(0, +dy)` in px (1 cm a 21 m ≈ 11,5 px).
+        - In V7 il riferimento è il punto medio semplice dei marker, senza i 5 cm di `CV_CUAS_TARGET_MIDPOINT_OFFSET_CM`.
+        - Dettagli in PLAN, "Decisioni prese con l'utente".
       - **Prossimi passi possibili** (da far scegliere all'utente):
         - resto della fase 3: `reinit_iou`, verifica più frequente a confidenza intermedia, dimensione minima dei box legata alla distanza; nessuno è proposto né approvato;
         - fase 4, validazione finale di V4;

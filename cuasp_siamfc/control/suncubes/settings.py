@@ -318,7 +318,11 @@ CV_SIAMFC_TARGET_RANGE_M = 21.0
 # Gating confidence for SiamFC samples (replaces CV_ARUCO_CONFIDENCE_MIN, which
 # is calibrated on the ArUco marker-area confidence, in siamfc mode).
 CV_SIAMFC_CONF_MIN = 0.15
-CV_SIAMFC_BBOX_OFFSET_PX = (0.0, 0.0)  # aim pixel = tracked box centre + this offset
+# Aim pixel = tracked box centre + this offset (x right, y down, px). Decision of the user (2026-11-19): aim at
+# the box centre for now. The laser should go slightly lower, by an amount still to be measured on the bench:
+# then set (0.0, +dy). With the fixed Z, 1 cm at 21 m is about 11.5 px (fx 24 119); the drone box is only
+# about 76-91 px (7-8 cm) high, so dy above about half of it would aim below the drone.
+CV_SIAMFC_BBOX_OFFSET_PX = (0.0, 0.0)
 
 # Tracking state machine (siamfc_source.SessionConfig; see its comments).
 # To be tuned in V4 on IDS recordings with tools/replay_siamfc_source.py.
