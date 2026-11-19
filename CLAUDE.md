@@ -158,7 +158,18 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
       - **Varianti misurate il 2026-11-19** (`runs/v4_p6_*`, confronto in `runs/v4_p6/compare.txt`, dettagli in PLAN, "Proposta P6"). Il bordo a 8 px elimina il drone assente dopo un'uscita (B4 r1, 0,42 s); una soglia di ripresa ≥ 0,35 elimina le riprese sbagliate (0,25–0,27); 0,5 costa copertura. Copertura totale invariata (85,1–85,2 %).
       - Restano episodi brevi (≤ 0,32 s) **senza ripresa**, non toccati da P6: tracker fermo sullo sfondo con drone veloce (B3 r2) e ritardo di uscita. La diagnosi del 2026-11-18 su B3 r2 era in parte sbagliata (corretta in PLAN).
       - **P6 applicata il 2026-11-19, valori scelti dall'utente: `CV_SIAMFC_RECOVER_CONF = 0.35`, `CV_SIAMFC_RECOVER_EDGE_PX = 8.0`** (anche come default di `SessionConfig`, perché il replay usa i default delle dataclass; test `test_replay_defaults_match_the_runtime_settings`). Replica di conferma uguale alla prima misura. Suite: 321 passati + 1 fallimento noto.
-      - **Prossimo passo: la soglia di aggancio** (`CV_SIAMFC_ACQUIRE_MIN_SCORE`, `CV_DETECTOR_CONFIRM_FRAMES`, da riprovare anche sulla scena vuota): è la causa principale dei frame persi. Facoltativo dopo: nuovo training del detector con i frame IDS etichettati.
+      - **Soglia di aggancio misurata e applicata il 2026-11-19, scelta dell'utente 0,5 / 2: `CV_SIAMFC_ACQUIRE_MIN_SCORE = 0.5` (invariato), `CV_DETECTOR_CONFIRM_FRAMES = 2`** (era 3; anche come default di `ConfirmerConfig.frames_required`).
+        - Copertura 85,1 → 86,1 %, a 6 dB 95,1 → 96,4 %; riaggancio massimo 3,3 → 2,2 s.
+        - 0 falsi allarmi sulla scena vuota; tutti gli agganci del detector sul drone.
+        - 0,4 scartato: margine di 0,07 sul box più forte della scena vuota (0,33).
+        - Risultati in `runs/v4_acq_*` e `runs/v4_acq/`, dettagli in PLAN ("Ordine di esecuzione", punto 5.3). Suite: 322 passati + 1 fallimento noto.
+      - Visto nella variante 0,4 / 2: una ripresa spontanea sbagliata a 0,36, sopra `recover_conf`, per 0,59 s. P6 non modificata.
+      - Solo 7 registrazioni con drone sono a 6 dB (B6 6 dB, C): le altre sono a 0 dB, registrate prima della decisione sul guadagno.
+      - **Prossimi passi possibili** (da far scegliere all'utente):
+        - resto della fase 3: `reinit_iou`, verifica più frequente a confidenza intermedia, dimensione minima dei box legata alla distanza; nessuno è proposto né approvato;
+        - fase 4, validazione finale di V4;
+        - facoltativi: nuovo training del detector con i frame IDS, P5, B3/B4 registrati di nuovo a 6 dB;
+        - poi V3, V4b, V7 e V8.
     - Il guadagno si cambia solo da `CV_IDS_GAIN_DB` in `settings.py`: `record_ids.py` non ha un'opzione per il guadagno.
   - Analisi del blocco B: `tools/replay_siamfc_source.py <rec>/frames --calibration calibration\calibration_legacy_20260921_x_test.yaml --fps 62.6 --out ..\runs\v4_blockB\<nome>.csv` (da `cuasp_siamfc/`). Gli script di controllo (accordo tracker–detector, dettaglio delle perdite, provini con i box, prova del guadagno simulato) erano nella cartella temporanea della sessione: vanno riscritti se servono.
 
@@ -169,7 +180,7 @@ Quando l'utente ha le registrazioni (cartelle `recordings/<data_ora>_<nome>/`, g
 2. misurare il divario di dominio (dataset all'aperto contro uso al coperto) e i falsi positivi persistenti della scena, il limite noto della Fase 3;
 3. tarare `CV_SIAMFC_ACQUIRE_MIN_SCORE`, le soglie di perdita e la confidenza; se servono, aggiungere i frame etichettati al dataset del detector (PLAN Fase 2, punto 4).
 
-**Stato git:** tutto committato fino a `c975782` "Fix: fps" (impostazioni della camera, registratore v2). **Non ancora committati** (V5, 2026-11-16), da far committare all'utente: `tools/bench_siamfc.py` (`--frame-size`), `tools/replay_siamfc_source.py` (`--resize`, `--preload`, box grezzi del detector in `*_detections.csv`), `tests/test_replay_tool.py`, `cuasp_siamfc/README.md`, `PLAN.md` e questo file.
+**Stato git:** tutto committato fino a `8a98d0d` "Update: p6" (P6 compresa). **Non ancora committati** (soglia di aggancio, 2026-11-19), da far committare all'utente: `settings.py`, `siamfc/detector.py`, `siamfc_source.py`, `tests/test_siamfc_source_adapter.py`, `cuasp_siamfc/README.md`, `PLAN.md` e questo file.
 
 **Ultima modifica fatta (2026-11-11), opzione A scelta dall'utente:** in `MotorCommandDispatcher` lo stop su perdita viene inviato dal worker `_run()` invece che da un task separato, quindi arriva sempre dopo un `abs_rotate` già in volo. Un comando la cui lettura encoder era in corso al momento della perdita viene scartato. È documentato come cambiamento di comportamento rispetto a C-UASP in `cuasp_siamfc/PROVENANCE.md` e nel README ("Behaviour changes with respect to C-UASP"). In C-UASP la corsa resta, perché quel repository non si modifica. Test end-to-end 30/30, suite 251 passati + 1 fallimento noto.
 

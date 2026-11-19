@@ -327,6 +327,9 @@ CV_SIAMFC_LOST_FRAMES = 5
 CV_SIAMFC_MAX_LOST_S = 1.0
 CV_SIAMFC_REF_FRAMES = 5
 CV_SIAMFC_MISSING_HZ = 10.0  # full-frame detection while searching / lost
+# Kept at 0.5 after the V4 replays (2026-11-19, with CV_DETECTOR_CONFIRM_FRAMES): 0.4 gained 0.8-1.7 coverage
+# points but left only 0.07 of margin over the strongest box of the empty scene (0.33, A10 at 0 dB, lights off).
+# It is the only protection against a static false positive, which looks like a hovering drone.
 CV_SIAMFC_ACQUIRE_MIN_SCORE = 0.5
 CV_SIAMFC_REDETECT_HZ = 5.0  # verification while tracking
 CV_SIAMFC_VERIFY_RADIUS = 1.5
@@ -352,7 +355,12 @@ CV_DETECTOR_MAX_DET = 10
 CV_DETECTOR_FP16 = 1
 CV_DETECTOR_MAX_BOX_FRAC = 0.3  # boxes larger than this fraction of the frame's larger side are dropped
 CV_DETECTOR_MIN_BOX_PX = 4.0
-CV_DETECTOR_CONFIRM_FRAMES = 3  # consistent full-frame detections needed to start a track
+# Consistent full-frame detections (each >= CV_SIAMFC_ACQUIRE_MIN_SCORE) needed to start a track. 2 chosen
+# by the user on 2026-11-19 after the V4 replays (was 3): coverage 85.1 % -> 86.1 % (6 dB recordings
+# 95.1 % -> 96.4 %), re-acquisition median 0.52 -> 0.38 s and max 3.3 -> 2.2 s, all detector locks on the
+# drone, 0 false alarms on the empty scene (no box >= 0.5 there). Fewer frames filter fewer one-off false
+# positives. The replay uses ConfirmerConfig's default, which must stay equal to this value.
+CV_DETECTOR_CONFIRM_FRAMES = 2
 CV_DETECTOR_CONFIRM_MAX_SHIFT = 1.0
 CV_DETECTOR_CONFIRM_MAX_SIZE_RATIO = 1.5
 CV_DETECTOR_CONFIRM_MAX_GAP_S = 0.5

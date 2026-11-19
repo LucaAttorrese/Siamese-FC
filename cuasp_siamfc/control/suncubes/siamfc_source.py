@@ -116,7 +116,7 @@ class SessionConfig:
     max_lost_s: float = 1.0  # time in "lost" before the tracker is dropped (-> searching)
     ref_frames: int = 5  # updates after (re)initialisation used for the peak/APCE references
     missing_hz: float = 10.0  # full-frame detection rate while searching or lost
-    acquire_min_score: float = 0.5  # detections below this score never start a track (to be tuned in V4)
+    acquire_min_score: float = 0.5  # detections below this score never start a track (kept at 0.5 after the V4 replays)
     # Verification rate while tracking (0 disables verification). With verify_miss_limit it bounds how long
     # a tracker that slid onto the background stays "reliable": ~verify_miss_limit / redetect_hz. DUT replay
     # (2026-11-10): 2 Hz x 3 misses -> 1.5 s wrong-target segments; 5 Hz x 2 -> ~0.4 s, and wrong-target

@@ -248,7 +248,10 @@ class UltralyticsDroneDetector:
 
 @dataclass(frozen=True)
 class ConfirmerConfig:
-    frames_required: int = 3  # consecutive consistent detections needed to confirm a target
+    # Consecutive consistent detections needed to confirm a target. 2 chosen on 2026-11-19 after the V4
+    # replays, equal to settings.CV_DETECTOR_CONFIRM_FRAMES so that tools/replay_siamfc_source.py
+    # reproduces the runtime.
+    frames_required: int = 2
     max_center_shift: float = 1.0  # max centre displacement between two detections, in units of the previous box side
     max_size_ratio: float = 1.5  # max ratio between the sides of two consecutive detections
     max_gap_s: float = 0.5  # detections further apart in time do not count as consecutive

@@ -256,6 +256,18 @@ def test_recovery_defaults_are_the_values_chosen_after_the_v4_replays():
     SessionConfig(recover_conf=0.5, recover_edge_px=0.0).validate()
 
 
+def test_acquisition_defaults_are_the_values_chosen_after_the_v4_replays():
+    # Acquisition values chosen by the user on 2026-11-19 (score 0.5 kept, 2 confirmations instead of 3);
+    # dataclasses and settings.py must agree, as for the recovery values above.
+    from suncubes import settings
+    from suncubes.siamfc.detector import ConfirmerConfig
+    assert (SessionConfig().acquire_min_score, ConfirmerConfig().frames_required) == (0.5, 2)
+    assert settings.CV_SIAMFC_ACQUIRE_MIN_SCORE == SessionConfig().acquire_min_score
+    assert settings.CV_DETECTOR_CONFIRM_FRAMES == ConfirmerConfig().frames_required
+    # the strongest empty-scene box in V4 had score 0.33: the threshold must keep a margin over it
+    assert SessionConfig().acquire_min_score > 0.33
+
+
 def test_lost_too_long_drops_the_tracker():
     s, tr = _session(lost_frames=1, max_lost_s=0.5, ref_frames=1)
     _lock_on(s)

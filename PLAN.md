@@ -513,7 +513,26 @@ Due casi su tre seguono un'uscita del drone dal bordo: il centro del box è rima
         - Tutti e due gli episodi, e un terzo comparso solo nella replica di ieri (B6, 26 frame), sono **riprese spontanee del tracker dopo "lost"** con confidenza appena sopra la soglia (0,26–0,30) su sfondo o bordo: proposta P6.
       - **Variabilità tra due esecuzioni identiche** (oggi contro 16–17 novembre): copertura per scenario entro 0,8 punti. Gli episodi pericolosi invece compaiono o no (B6 a 0 dB: 26 frame ieri, 0 oggi): vanno confrontati su più esecuzioni, o contati comunque come presenti.
       - Quasi tutti gli spezzoni sono a 0 dB, mentre l'impostazione attuale è 6 dB: B6 e B2 a 0 dB sono prove di stress.
-   3. taratura delle soglie con vincoli di sicurezza (zero agganci sulla scena vuota, bersaglio sbagliato praticamente zero);
+   3. 🟡 taratura delle soglie con vincoli di sicurezza (zero agganci sulla scena vuota, bersaglio sbagliato praticamente zero).
+      - ✅ P6, ripresa spontanea da "lost": applicata il 2026-11-19 (sezione "Proposta P6").
+      - ✅ **Soglia di aggancio** (`CV_SIAMFC_ACQUIRE_MIN_SCORE`, `CV_DETECTOR_CONFIRM_FRAMES`), 2026-11-19.
+        - Stima offline prima dei replay (`runs/v4_acq/sim_acquire.py`, uscita in `sim_rc035_r2.txt`): il confermatore rieseguito sui box grezzi del detector (`*_detections.csv`) prima di ogni aggancio vero. Riproduce 94 agganci veri su 94; nessun aggancio falso previsto fino a 0,35. Soglie ≤ 0,35 escluse per il margine troppo piccolo sulla scena vuota.
+        - Replay di 3 varianti, ognuna sulle 29 registrazioni e sui 16 spezzoni di scena vuota, con P6 applicata (circa 2 ore e 50 minuti in tutto; `runs/v4_acq_t050_k2`, `..._t040_k3`, `..._t040_k2`; script `run_acq.sh` / `run_acq_resume.sh`; confronto in `runs/v4_acq/compare.txt`, episodi in `episodes.txt`). Riferimento: le due esecuzioni di P6 a 0,5 / 3.
+
+        | score / conferme | copertura | a 6 dB (7 registrazioni) | bersaglio sbagliato (frame) | episodio pericoloso più lungo | riaggancio mediana / max |
+        |---|---|---|---|---|---|
+        | 0,5 / 3 (P6) | 85,1 % | 95,1 % | 29 | 0,30–0,32 s | 0,52 / 3,32 s |
+        | **0,5 / 2** | 86,1 % | 96,4 % | 0 | 0,22 s | 0,38 / 2,17 s |
+        | 0,4 / 3 | 86,2 % | 96,0 % | 27 | 0,30 s | 0,53 / 2,30 s |
+        | 0,4 / 2 | 87,6 % | 97,2 % | 34 | 0,43 s | 0,34 / 2,17 s |
+
+        - In tutte le varianti: **0 falsi allarmi sulla scena vuota** e **tutti gli agganci del detector sul drone** (94–116). I frame sul bersaglio sbagliato vengono tutti da episodi successivi a un aggancio corretto, con il tracker fermo sullo sfondo mentre il drone si sposta (B3 r2; B6 6 dB r3 in 0,4 / 2). Compaiono o spariscono con i tempi degli eventi, non dipendono dai valori di aggancio.
+        - Margine sulla scena vuota: il box più forte ha score 0,33 (A10, 0 dB, luci spente); a 6 dB 0,26 (A20, solo 4 spezzoni sulla stessa parete). Con 0,4 restano 0,07 contro un falso positivo fisso, che per la sorgente è indistinguibile da un drone fermo (limite noto della Fase 3). La soglia di score è l'unica protezione contro questo caso; il numero di conferme filtra solo i falsi positivi di un istante.
+        - 0,4 / 3 non è migliore di 0,5 / 2 (stessa copertura, riaggancio più lento).
+        - Nella variante 0,4 / 2, B6 6 dB r3, frame 2450–2486: **ripresa spontanea sbagliata a confidenza 0,36**. Il tracker era fermo sullo sfondo accanto al drone; la confidenza è scesa a 0,23, poi è risalita a 0,36–0,47 sullo sfondo. Bersaglio sbagliato per 0,59 s, a circa 10 mrad dal drone, chiuso dalla verifica. Il detector dava 0,22–0,40 sul drone, quindi la soglia di aggancio non c'entra. È la prima ripresa sbagliata sopra `recover_conf` 0,35; con la configurazione scelta non si presenta. P6 non modificata.
+        - Guadagno: solo 7 registrazioni con drone (B6 6 dB, C) e 4 di scena vuota (A20–A23) sono a 6 dB, l'impostazione attuale; le altre sono state registrate prima della decisione. Oltre metà dei frame persi è in quattro registrazioni a 0 dB con sfondo scuro (B6 r2–r4, B2 r4). A 6 dB le perdite sono quasi tutte in B6 6 dB r3 (85 % con 0,5 / 2).
+        - **Scelta dell'utente (2026-11-19): 0,5 / 2** (raccomandata). Applicata: `CV_DETECTOR_CONFIRM_FRAMES = 2` in `settings.py` (era 3), `CV_SIAMFC_ACQUIRE_MIN_SCORE` resta 0,5; default di `ConfirmerConfig.frames_required` portato a 2, perché il replay usa i default delle dataclass. Test nuovo `test_acquisition_defaults_are_the_values_chosen_after_the_v4_replays`. Suite: 322 passati + 1 fallimento noto. Replica di conferma non fatta: la configurazione scelta coincide con `runs/v4_acq_t050_k2`, e le due esecuzioni di P6 differivano al massimo di 0,1 punti.
+      - Da valutare (non proposti né approvati): `reinit_iou` più alto per correggere prima la deriva del box (B1 r2); verifica più frequente quando la confidenza è intermedia, per accorciare gli episodi rimasti (tracker fermo sullo sfondo, ritardo di uscita, fino a 0,3 s); dimensione minima dei box legata alla distanza di esercizio (eliminerebbe i box piccoli della scena vuota, 38–61 px).
    4. validazione finale.
 
    Facoltativi, da decidere dopo la fase 2: P5, nuovo training del detector con frame IDS, V4b, V3.
