@@ -315,7 +315,7 @@ Non approvata: decisione dell'utente rimandata. Per ora il rimedio è il guadagn
 
 Per numeri solidi nei tratti senza tracking servono etichette su un campione di frame, pre-generate e corrette dall'utente (già previste per V4). Stima: 1–2 ore di implementazione e test, 1–1,5 ore di calcolo in background.
 
-## Proposta P6 — Isteresi sulla ripresa spontanea del tracker (2026-11-18): implementata con i valori attuali, valori da scegliere
+## Proposta P6 — Isteresi sulla ripresa spontanea del tracker (2026-11-18): ✅ applicata il 2026-11-19 (bordo 8 px, `recover_conf` 0,35)
 
 **Problema** (V4, misura di partenza). Dopo una perdita per confidenza bassa (`lost` recuperabile), `TrackingSession` torna in `tracking` da sola se la confidenza resta ≥ `lost_conf` (0,25) per `lost_frames` (5) frame. Entrata e uscita da `lost` usano la stessa soglia. Nelle 29 registrazioni:
 - 9 riprese vere del tracker, cioè senza nuova inizializzazione e con il box continuo: 7 buone, con confidenza 0,27–0,5; 2 sbagliate, a 0,26–0,27, che sono i due episodi pericolosi della misura (B3 r2 bersaglio sbagliato per 0,30 s, B4 r1 drone assente per 0,42 s);
@@ -340,13 +340,24 @@ Due casi su tre seguono un'uscita del drone dal bordo: il centro del box è rima
 - **Implementazione**: `SessionConfig.recover_conf` / `recover_edge_px` in `siamfc_source.py`, impostazioni `CV_SIAMFC_RECOVER_CONF = 0.25` e `CV_SIAMFC_RECOVER_EDGE_PX = None` in `settings.py` (valori che riproducono il comportamento attuale), mappa in `cuasp.py`, validazione in `settings.validate()` e `SessionConfig.validate()`.
   - Con `recover_edge_px` impostato, una perdita per confidenza con il box a meno di quei px dal bordo non è recuperabile (contatore `lost_at_edge`), e i frame di ripresa devono essere lontani dal bordo.
 - **Test**: 4 in `test_siamfc_source_adapter.py` (isteresi, perdita al bordo, ripresa lontano dal bordo, default e validazione), 8 casi in `test_settings_validate.py`. Suite: 320 passati + 1 fallimento noto. Prova breve del replay: le impostazioni passate con `--siamfc` arrivano alla sessione.
-- **Da fare: la misura** (per decisione dell'utente non fatta nella sessione del 2026-11-18). Circa 2–2,5 ore in background, niente registrazioni nel frattempo. Varianti, ognuna sulle 29 registrazioni in tempo reale, una dopo l'altra:
-  1. `--siamfc recover_edge_px=8`;
-  2. `--siamfc recover_edge_px=8 recover_conf=0.35`;
-  3. `--siamfc recover_edge_px=8 recover_conf=0.4`;
-  4. `--siamfc recover_edge_px=8 recover_conf=0.5`.
-  
-  Poi una replica di conferma della variante scelta, e il confronto con la misura di partenza: `tools/v4_report.py ../runs/v4_p6_<variante>` contro `../runs/v4_baseline`. La scena vuota non serve, perché la ripresa avviene solo da `lost`, che senza aggancio non si verifica.
+- **Misura fatta il 2026-11-19** (4 varianti × 29 registrazioni in tempo reale, 2 ore; `runs/v4_p6_edge8`, `..._edge8_rc035`, `..._edge8_rc040`, `..._edge8_rc050`; script, confronto ed episodi in `runs/v4_p6/`: `run_p6.sh`, `compare_p6.py`, `episodes.py`, `compare.txt`). La scena vuota non serve: la ripresa avviene solo da `lost`, che senza aggancio non si verifica.
+
+  | | copertura | bersaglio sbagliato (frame) | drone assente, non dopo un'uscita | episodio pericoloso più lungo | riprese spontanee |
+  |---|---|---|---|---|---|
+  | partenza | 85,3 % | 29 | 27 | 0,42 s | 11 |
+  | bordo 8 px | 85,2 % | 67 | 0 | 0,32 s | 5 |
+  | bordo 8 px + 0,35 | 85,1 % | 29 | 0 | 0,30 s | 1 |
+  | bordo 8 px + 0,4 | 85,2 % | 28 | 0 | 0,30 s | 0 |
+  | bordo 8 px + 0,5 | 84,9 % | 29 | 0 | 0,32 s | 0 |
+
+  - **Regola del bordo**: elimina l'episodio più lungo della partenza (B4 r1, drone assente per 0,42 s, ripresa a 0,26 dopo l'uscita). Costo: 4 riprese buone vicino al bordo diventano riagganci del detector, quindi −2,7 punti di copertura su B4 r1, −1,5 su B6 r1, −1,3 su B3 r3, −0,1 in totale; uguale nelle 4 varianti, quindi è un effetto vero. 11 perdite al bordo (`lost_at_edge`).
+  - **Soglia di ripresa**: le riprese sbagliate osservate hanno confidenza 0,25–0,27 (B3 r2, B4 r1 e, nella variante con il solo bordo, B6 6 dB r3 con 18 frame sul bersaglio sbagliato). Quelle buone e lunghe vanno da 0,31 a 0,50; quelle buone ma brevi (circa 25 frame) da 0,26 a 0,39. Con 0,35 resta 1 ripresa (buona, 0,38), con 0,4 nessuna. Con 0,5 il costo è visibile: in B6 6 dB r3 una ripresa buona a 0,36 (191 frame nella partenza) diventa 2,2 s di ricerca sullo sfondo scuro (−7,5 punti su quella registrazione).
+  - **Correzione della diagnosi del 2026-11-18**: i 29 frame sbagliati di B3 r2 nella partenza sono due episodi, non uno. 19 frame vengono da una ripresa a 0,25 (eliminata con soglia ≥ 0,35); 10 frame (1118–1127) vengono da un drone veloce uscito dalla finestra di ricerca, con il tracker fermo sullo sfondo a confidenza 0,27–0,35 **durante il tracking**, senza ripresa. P6 non li tocca: restano in tutte le varianti (10–12 frame). Nelle varianti P6 compare in B3 r2 un secondo episodio dello stesso tipo (3018–3035, 17–18 frame, confidenza 0,30–0,57, subito dopo un'inizializzazione del detector), perché la sequenza degli eventi cambia.
+  - **Pericoli rimanenti dopo P6**, tutti chiusi dalla verifica a 5 Hz entro 0,32 s: tracker fermo sullo sfondo con un drone veloce (B3 r2) e ritardo di uscita (drone uscito, box sullo sfondo a confidenza 0,25–0,40, fino a 20 frame in B4). Leva possibile, non proposta né misurata: una verifica più frequente quando la confidenza è intermedia.
+- **Scelta dell'utente (2026-11-19): bordo 8 px e `recover_conf` 0,35** (raccomandato 0,4; 0,35 tiene le riprese buone tra 0,35 e 0,4, con un margine di 0,08 sopra le riprese sbagliate osservate).
+  - **Replica di conferma** (`runs/v4_p6_edge8_rc035_r2`, confronto in `runs/v4_p6/compare_confirm.txt`): copertura 85,1 % come nella prima misura, drone assente non dopo un'uscita 0, bersaglio sbagliato 29 frame (gli stessi due episodi di B3 r2 senza ripresa), nessuna ripresa spontanea, episodio pericoloso più lungo 0,32 s.
+  - **Applicata**: `CV_SIAMFC_RECOVER_CONF = 0.35` e `CV_SIAMFC_RECOVER_EDGE_PX = 8.0` in `settings.py`, stessi valori come default di `SessionConfig`. `tools/replay_siamfc_source.py` usa i default delle dataclass e non `settings.py`: il test nuovo `test_replay_defaults_match_the_runtime_settings` (in `test_camera_config_routing.py`) verifica che coincidano per tutti i parametri della sorgente. Suite: 321 passati + 1 fallimento noto.
+  - Documentata nel README ("Implementation notes" e "Validation status").
 
 ## Ordine di esecuzione (sul PC di training, RTX 5060 Laptop)
 

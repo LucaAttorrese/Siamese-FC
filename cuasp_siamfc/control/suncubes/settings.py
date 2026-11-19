@@ -335,12 +335,13 @@ CV_SIAMFC_VERIFY_MAX_SIZE_RATIO = 1.5
 CV_SIAMFC_REINIT_IOU = 0.5
 CV_SIAMFC_REINIT_CONFIRM = 2
 CV_SIAMFC_VERIFY_MISS_LIMIT = 2
-# Spontaneous recovery from "lost" (proposal P6 in PLAN.md, 2026-11-18). These defaults keep the
-# behaviour measured in the V4 baseline (recovery at CV_SIAMFC_LOST_CONF, no edge check); the values
-# are chosen after the V4 replays. CV_SIAMFC_RECOVER_CONF must be >= CV_SIAMFC_LOST_CONF;
-# CV_SIAMFC_RECOVER_EDGE_PX is None (off) or px >= 0.
-CV_SIAMFC_RECOVER_CONF = 0.25
-CV_SIAMFC_RECOVER_EDGE_PX = None
+# Spontaneous recovery from "lost" (proposal P6 in PLAN.md). Values chosen by the user on 2026-11-19
+# after the V4 replays of the 29 IDS recordings: wrong recoveries had confidence 0.25-0.27, good long
+# ones 0.31-0.50; the edge rule removes the recoveries on the background after the drone left the frame.
+# Coverage unchanged (85.3 % -> 85.1-85.2 %). The V4 baseline behaviour is 0.25 / None.
+# CV_SIAMFC_RECOVER_CONF must be >= CV_SIAMFC_LOST_CONF; CV_SIAMFC_RECOVER_EDGE_PX is None (off) or px >= 0.
+CV_SIAMFC_RECOVER_CONF = 0.35
+CV_SIAMFC_RECOVER_EDGE_PX = 8.0
 
 # Drone detector (siamfc.detector.DetectorConfig / ConfirmerConfig).
 CV_DETECTOR_DEVICE = ""  # "" = Ultralytics default (first CUDA GPU when available)

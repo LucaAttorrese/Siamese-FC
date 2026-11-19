@@ -132,6 +132,26 @@ def test_every_siamfc_setting_reaches_the_source_configuration(cuasp):
     assert c.detector.imgsz == settings.CV_DETECTOR_IMGSZ
 
 
+def test_replay_defaults_match_the_runtime_settings(cuasp):
+    """tools/replay_siamfc_source.py builds the source from the dataclass defaults (plus its
+    --siamfc / --detector overrides), the runtime from settings.py: they must agree, or the V4
+    replays would not measure the runtime behaviour."""
+    from suncubes import settings
+    from suncubes.siamfc_source import SiamFCSourceConfig
+    s, d = cuasp._siamfc_source_dicts()
+    runtime = SiamFCSourceConfig.from_dicts(s, d)
+    replay = SiamFCSourceConfig.from_dicts({"weights_path": s["weights_path"], "target_range_m": 21.0},
+                                           {"weights_path": d["weights_path"]})
+    assert runtime.session == replay.session
+    assert runtime.confirmer == replay.confirmer
+    assert (runtime.params, runtime.bbox_offset_px) == (replay.params, replay.bbox_offset_px)
+    assert runtime.target_range_m == replay.target_range_m == settings.CV_SIAMFC_TARGET_RANGE_M
+    ignore = {"weights_path", "weights_sha256", "device"}  # identity of the file / device choice, not behaviour
+    rt = {k: v for k, v in dataclasses.asdict(runtime.detector).items() if k not in ignore}
+    rp = {k: v for k, v in dataclasses.asdict(replay.detector).items() if k not in ignore}
+    assert rt == rp
+
+
 def test_siamfc_config_routes_to_the_siamfc_adapter(cuasp):
     api = cuasp.CameraAPI(cuasp._build_camera_config())
     assert type(api._app._source).__name__ == "IdsSiamFCCorrectionSourceAdapter"

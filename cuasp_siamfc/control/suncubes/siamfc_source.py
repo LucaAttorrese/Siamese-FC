@@ -132,10 +132,11 @@ class SessionConfig:
     # Spontaneous recovery from a recoverable "lost" (proposal P6, PLAN.md; V4 baseline 2026-11-18): with the
     # same threshold for entering and leaving "lost", the background under a stale box hovered around it
     # (0.26-0.30) and the tracker resumed "reliable" on it 3 times in the IDS recordings (B3 r2 wrong target
-    # 0.30 s; B4 r1 and B6 drone already out of the frame, box across the edge). The defaults keep the
-    # previous behaviour until the values are chosen.
-    recover_conf: float = 0.25  # confidence needed for lost_frames frames to resume by itself (>= lost_conf)
-    recover_edge_px: Optional[float] = None  # a tracked box closer than this to a frame edge (negative: across
+    # 0.30 s; B4 r1 and B6 drone already out of the frame, box across the edge). Values chosen by the user
+    # on 2026-11-19 after the V4 replays (same as settings.py, so that tools/replay_siamfc_source.py
+    # replays the runtime behaviour); the previous behaviour is recover_conf = lost_conf, recover_edge_px = None.
+    recover_conf: float = 0.35  # confidence needed for lost_frames frames to resume by itself (>= lost_conf)
+    recover_edge_px: Optional[float] = 8.0  # a tracked box closer than this to a frame edge (negative: across
     #                                          it) makes a confidence loss non-recoverable and blocks the
     #                                          recovery frames; None disables the check
 

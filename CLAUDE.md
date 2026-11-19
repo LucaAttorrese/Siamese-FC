@@ -13,7 +13,7 @@ Il piano dettagliato, con lo stato di ogni fase, è in [PLAN.md](PLAN.md). La pr
 - **Sicurezza** (sistema di puntamento fisico, regole di C-UASP): non indebolire limiti, clamp, controlli di freschezza del campione o stop su perdita; nessuna conversione di unità implicita. Le prove dal vivo partono con `CV_CUAS_ENABLE_MOTOR_COMMANDS = 0`.
 - **Motori disabilitati di default** (`CV_CUAS_ENABLE_MOTOR_COMMANDS = 0` in `settings.py`, decisione del 2026-11-10). **Quando si arriva alla prova con motori abilitati (V8), ricordarlo all'utente prima di iniziare:** vanno abilitati esplicitamente e solo per quella prova.
 - Prima di comandi lunghi o costosi (training, download di GB, ricerche di iperparametri) indicare durata e spazio previsti. I processi lunghi vanno in background, con un controllo che si fermi anche in caso di errore.
-- Le proposte P1–P6 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle.
+- Le proposte P1–P5 in `PLAN.md` **non sono approvate**: chiedere prima di applicarle. P6 è stata approvata e applicata il 2026-11-19.
 
 ## Cos'è questo progetto
 
@@ -155,8 +155,10 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
       - Episodi pericolosi: tre riprese spontanee da "lost" con confidenza appena sopra 0,25, proposta P6.
     - **Fase 3 avviata il 2026-11-18 con P6** (approvata dall'utente per implementazione e misura).
       - Implementata con valori che non cambiano il comportamento: `CV_SIAMFC_RECOVER_CONF = 0.25`, `CV_SIAMFC_RECOVER_EDGE_PX = None`. Suite: 320 passati + 1 fallimento noto.
-      - **Prossimo passo: misurare le 4 varianti** (comandi e piano in PLAN, "Proposta P6"; circa 2–2,5 ore in background, niente registrazioni nel frattempo). Poi far scegliere i valori all'utente.
-      - Dopo P6: la soglia di aggancio (`CV_SIAMFC_ACQUIRE_MIN_SCORE`, `CV_DETECTOR_CONFIRM_FRAMES`, da riprovare anche sulla scena vuota); facoltativo, nuovo training del detector con i frame IDS etichettati.
+      - **Varianti misurate il 2026-11-19** (`runs/v4_p6_*`, confronto in `runs/v4_p6/compare.txt`, dettagli in PLAN, "Proposta P6"). Il bordo a 8 px elimina il drone assente dopo un'uscita (B4 r1, 0,42 s); una soglia di ripresa ≥ 0,35 elimina le riprese sbagliate (0,25–0,27); 0,5 costa copertura. Copertura totale invariata (85,1–85,2 %).
+      - Restano episodi brevi (≤ 0,32 s) **senza ripresa**, non toccati da P6: tracker fermo sullo sfondo con drone veloce (B3 r2) e ritardo di uscita. La diagnosi del 2026-11-18 su B3 r2 era in parte sbagliata (corretta in PLAN).
+      - **P6 applicata il 2026-11-19, valori scelti dall'utente: `CV_SIAMFC_RECOVER_CONF = 0.35`, `CV_SIAMFC_RECOVER_EDGE_PX = 8.0`** (anche come default di `SessionConfig`, perché il replay usa i default delle dataclass; test `test_replay_defaults_match_the_runtime_settings`). Replica di conferma uguale alla prima misura. Suite: 321 passati + 1 fallimento noto.
+      - **Prossimo passo: la soglia di aggancio** (`CV_SIAMFC_ACQUIRE_MIN_SCORE`, `CV_DETECTOR_CONFIRM_FRAMES`, da riprovare anche sulla scena vuota): è la causa principale dei frame persi. Facoltativo dopo: nuovo training del detector con i frame IDS etichettati.
     - Il guadagno si cambia solo da `CV_IDS_GAIN_DB` in `settings.py`: `record_ids.py` non ha un'opzione per il guadagno.
   - Analisi del blocco B: `tools/replay_siamfc_source.py <rec>/frames --calibration calibration\calibration_legacy_20260921_x_test.yaml --fps 62.6 --out ..\runs\v4_blockB\<nome>.csv` (da `cuasp_siamfc/`). Gli script di controllo (accordo tracker–detector, dettaglio delle perdite, provini con i box, prova del guadagno simulato) erano nella cartella temporanea della sessione: vanno riscritti se servono.
 

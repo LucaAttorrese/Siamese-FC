@@ -242,11 +242,14 @@ def test_recovery_frames_must_be_away_from_the_frame_edge():
     assert s.on_frame(_frame(), 221 * MS).state == STATE_TRACKING
 
 
-def test_recovery_defaults_keep_the_previous_behaviour():
+def test_recovery_defaults_are_the_values_chosen_after_the_v4_replays():
+    # P6 values chosen by the user on 2026-11-19; dataclass and settings.py must agree, because
+    # tools/replay_siamfc_source.py uses the dataclass defaults and the runtime uses settings.py.
     from suncubes import settings
     c = SessionConfig()
-    assert c.recover_conf == c.lost_conf and c.recover_edge_px is None
-    assert settings.CV_SIAMFC_RECOVER_CONF == settings.CV_SIAMFC_LOST_CONF and settings.CV_SIAMFC_RECOVER_EDGE_PX is None
+    assert (c.recover_conf, c.recover_edge_px) == (0.35, 8.0)
+    assert (settings.CV_SIAMFC_RECOVER_CONF, settings.CV_SIAMFC_RECOVER_EDGE_PX) == (c.recover_conf, c.recover_edge_px)
+    assert c.recover_conf > c.lost_conf  # hysteresis: wrong recoveries in V4 had confidence 0.25-0.27
     for bad in ({"recover_conf": 0.2}, {"recover_conf": 1.0}, {"recover_edge_px": -1.0}, {"recover_edge_px": float("nan")}):
         with pytest.raises(ValueError):
             SessionConfig(**bad).validate()
