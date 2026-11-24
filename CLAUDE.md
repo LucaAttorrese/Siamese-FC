@@ -169,6 +169,15 @@ Sono documentate in `PROVENANCE.md` (cambiamenti di comportamento 3–5) e nel R
         - Il laser dovrebbe andare leggermente più in basso, di quanto va misurato al banco; poi `(0, +dy)` in px (1 cm a 21 m ≈ 11,5 px).
         - In V7 il riferimento è il punto medio semplice dei marker, senza i 5 cm di `CV_CUAS_TARGET_MIDPOINT_OFFSET_CM`.
         - Dettagli in PLAN, "Decisioni prese con l'utente".
+      - **V7 avviato il 2026-11-23** (l'utente vuole chiudere SiamFC prima di SiamMask).
+        - Limite di accettazione deciso: scarto medio ≤ 0,5 mrad per asse e 95 % dei frame entro 1,5 mrad. L'utente recupera la dimensione dello spot laser per rivederlo.
+        - Strumento `tools/v7_compare.py` con 5 test. Suite: 327 passati + 1 fallimento noto.
+        - Anteprima sul blocco C (`runs/v7/`, dettagli in PLAN, sezione "V7"):
+          - segni corretti;
+          - parte del tracker entro i limiti in tutte e 4 le registrazioni;
+          - 3 su 4 non superano il limite per la parte geometrica: i marker danno 22,7–23,5 m, la Z fissa è 21 m.
+        - Da chiedere/misurare: lato reale dei marker e distanza tra i loro centri sull'asta; distanza vera al banco.
+        - Il braccio camera→laser della calibrazione in uso è 25,6 cm, non 18: commento in `settings.py` e PLAN corretti.
       - **P7 SiamMask, passo 0 (fattibilità) fatto il 2026-11-19**, approvato dall'utente mentre V7/V8 aspettano. Dettagli in PLAN, "Proposta P7".
         - Codice in `cuasp_siamfc/experiments/siammask/`, fuori dal runtime; pesi in `pretrained/siammask/`; sorgenti originali in `reference/siammask_dl/`.
         - Solo box, FP16 con batch norm fuse: 5,9 ms, come SiamFC anche con YOLO in parallelo.

@@ -313,7 +313,9 @@ CV_SIAMFC_DEVICE = ""  # "" = cuda when available, else cpu
 CV_SIAMFC_PARAMS = "paper"  # "paper" (CFNet Table 2) or a dict of SiamFCParams overrides (from V4b)
 # Fixed camera depth Z used to back-project the target pixel (no range sensor):
 # centre of the expected 20-22 m. Parallax error for Z_true in 20..22 m is
-# |t_lc| * |1/Z_true - 1/Z| <= ~0.43 mrad with the 18 cm lever arm.
+# |t_lc| * |1/Z_true - 1/Z|. With the lever arm of the calibration in use (t_lc = (-0.16, -0.20, 0) m in
+# calibration_legacy_20260921_x_test.yaml, a hand-tuned value; the 18 cm of boresight.yaml gave ~0.43 mrad)
+# this is <= 0.38 mrad in azimuth and 0.48 mrad in elevation for Z_true in 20..22 m (V7 preview, 2026-11-23).
 CV_SIAMFC_TARGET_RANGE_M = 21.0
 # Gating confidence for SiamFC samples (replaces CV_ARUCO_CONFIDENCE_MIN, which
 # is calibrated on the ArUco marker-area confidence, in siamfc mode).
